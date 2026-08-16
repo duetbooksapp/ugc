@@ -105,6 +105,10 @@
   .modal input,.modal textarea,.modal select{width:100%}
   .qbar{font-size:12px;color:var(--muted);margin-bottom:10px}
   .qbrand{font-size:17px;font-weight:600;margin-bottom:2px}
+  .ideawrap{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
+  @media(max-width:620px){ .ideawrap{grid-template-columns:1fr} }
+  .suggestbox{background:var(--bg);border:1px dashed var(--line);border-radius:8px;
+              padding:9px 11px;font-size:13.5px;white-space:pre-wrap;min-height:132px}
 
   /* ---- login ---- */
   #login{max-width:380px;margin:12vh auto;}
@@ -595,6 +599,7 @@ function renderList(){
     if (c.kind === "personal") tags.push('<span class="tag personal">personal email</span>');
     if (c.dupBrand)            tags.push('<span class="tag dup">2 contacts here</span>');
     if (c.mine)                tags.push('<span class="tag mine">added by you</span>');
+    if (c.suggested)           tags.push('<span class="tag mine">researched ideas</span>');
     if (due)                   tags.push(`<span class="tag duealert">follow up · ${n}d</span>`);
 
     return `
@@ -933,9 +938,22 @@ function openCompose(list, i, forceVariant, ideasSoFar){
           `<option value="${esc(v.id)}" ${v.id === m0.variant ? "selected" : ""}>${esc(v.name)}</option>`
         ).join("")}</select></div>` : ""}
     ${followUp ? "" : `
-      <div class="field"><label>Your three ideas for ${esc(c.brand)}</label>
-        <textarea id="cIdeas" style="min-height:96px">${esc(ideas0)}</textarea></div>
-      <p class="hint" id="cIdeaWarn" style="margin:-6px 0 12px"></p>`}
+      <div class="ideawrap">
+        <div class="field">
+          <label>Your three ideas for ${esc(c.brand)}</label>
+          <textarea id="cIdeas" style="min-height:132px">${esc(ideas0)}</textarea>
+          <p class="hint" id="cIdeaWarn" style="margin:4px 0 0"></p>
+        </div>
+        ${c.suggested ? `
+        <div class="field">
+          <label>Suggested — from ${esc(c.site || "their site")}</label>
+          <div class="suggestbox">${esc(c.suggested)}</div>
+          <div class="row" style="margin-top:6px">
+            <button class="btn primary" id="cUseSug">Use these</button>
+            <button class="btn" id="cAppendSug">Add to mine</button>
+          </div>
+        </div>` : ""}
+      </div>`}
     <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
     <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
     <div class="row">
@@ -982,7 +1000,7 @@ function openCompose(list, i, forceVariant, ideasSoFar){
   };
   paintWarn();
 
-  ideasBox?.addEventListener("input", () => {
+  const ideasChanged = () => {
     paintWarn();
     const rebuilt = composeFor(c, followUp, m0.variant, ideasBox.value);
     // Only refresh the body while she hasn't hand-edited it, or we'd wipe her work.
@@ -991,6 +1009,20 @@ function openCompose(list, i, forceVariant, ideasSoFar){
       lastBuiltBody = rebuilt.body;
       sync();
     }
+  };
+  ideasBox?.addEventListener("input", ideasChanged);
+
+  // Suggested ideas never overwrite her own words without her asking.
+  m.querySelector("#cUseSug")?.addEventListener("click", () => {
+    const hers = ideasBox.value.trim();
+    if (hers && !ideasAreStock(c, hers) &&
+        !confirm("Replace what you've written with the suggested ideas?")) return;
+    ideasBox.value = c.suggested; ideasChanged();
+  });
+  m.querySelector("#cAppendSug")?.addEventListener("click", () => {
+    const hers = ideasBox.value.trim();
+    ideasBox.value = (hers && !ideasAreStock(c, hers)) ? hers + "\n" + c.suggested : c.suggested;
+    ideasChanged();
   });
 
   const advance = () => openCompose(list, i + 1);
