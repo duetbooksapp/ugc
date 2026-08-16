@@ -168,6 +168,7 @@
       <option value="personal">Personal (gmail etc.)</option>
     </select>
     <button class="chip" id="fDue">⏰ Follow-ups due</button>
+    <button class="chip" id="fNoIdeas">💡 Needs ideas</button>
   </div>
   <div class="row" id="cats"></div>
   <div class="row">
@@ -242,9 +243,9 @@ I'm {me} — I make user-generated content for brands, and I'd love to create so
 
 {hook}
 
-I can put together a short set of authentic videos and photos you're free to use on paid social, organic, or your product pages. A few samples of my work: {portfolio}
+{ideas}
 
-If you're open to it, I'll send over rates and some ideas specific to {brand}.
+Happy to shoot any of those, or something else entirely if you've got a launch coming up. A few samples of my work: {portfolio}
 
 Thanks for your time,
 {me}
@@ -256,7 +257,9 @@ I'm {me} — I make user-generated content for brands, and I'd love to create so
 
 {hook}
 
-I can put together a short set of authentic videos and photos you're free to use on paid social, organic, or your product pages. A few samples of my work: {portfolio}
+{ideas}
+
+Happy to shoot any of those, or something else entirely if there's a launch coming up. A few samples of my work: {portfolio}
 
 Thanks for your time,
 {me}
@@ -273,9 +276,11 @@ Thanks for your time,
 
 That's the kind of thing I'd want to make for {brand}. I'm {me}, and I create user-generated content — the unpolished, believable kind that reads like a recommendation instead of an ad.
 
+{ideas}
+
 Here's some of my work: {portfolio}
 
-If there's a launch or a product you're pushing right now, tell me which and I'll come back with two or three specific concepts.
+If one of those is close, tell me which and I'll flesh it out properly.
 
 Thanks,
 {me}
@@ -286,6 +291,8 @@ Thanks,
 {hook}
 
 That's the kind of thing I'd want to make for {brand}. I'm {me}, and I create user-generated content — the unpolished, believable kind that reads like a recommendation instead of an ad. If someone else there handles creator partnerships, I'd appreciate you passing this on.
+
+{ideas}
 
 Here's some of my work: {portfolio}
 
@@ -323,6 +330,62 @@ Thanks,
     "DTC & Lifestyle": "I'd make content that shows {brand} fitting into an ordinary day, in a way that feels recommended rather than advertised.",
     "UK & Europe": "I'd create content that suits {brand}'s tone rather than the louder US style of creator content.",
     "Apps & Tech": "I'd show {brand} solving an actual problem on screen — short, clear, and genuinely useful to watch."
+  },
+
+  // Sits above the ideas in the email. Vanishes entirely if there are no ideas.
+  ideasLead: "Three ideas I'd love to run past you:",
+
+  // Starting points only — the pitch works because the ideas are specific, so
+  // these are meant to be rewritten per brand, and the app says so.
+  ideaScaffolds: {
+    "Pickleball":
+`1. A "first hit" clip — unboxing the paddle and playing the opening three points with it.
+2. A control-vs-power rally shot in real match light, not a studio.
+3. A what's-in-my-bag for rec players, with {brand} as the centrepiece.`,
+    "Fashion & Apparel":
+`1. A one-week wear test — the same piece styled five ways across a normal week.
+2. A fit-and-fabric close-up for the product page: no music, just movement.
+3. A getting-dressed POV that lands on the {brand} piece as the anchor.`,
+    "Supplements & Wellness":
+`1. A 7-day routine diary showing where {brand} actually fits in a morning.
+2. An honest "first two weeks" check-in, filmed unscripted.
+3. A label-read explainer walking through what's actually in it.`,
+    "Food & Beverage":
+`1. A 15-second pour-and-taste built for paid social.
+2. "Three ways I actually use this", filmed in one kitchen session.
+3. A fridge-restock reel with {brand} sitting where it really lives.`,
+    "Beauty & Skincare":
+`1. A no-filter application close-up in morning light, zero retouching.
+2. A four-week diary that keeps the unflattering first shot in.
+3. An ingredient-list explainer that treats the viewer as smart.`,
+    "Home & Kitchen":
+`1. A real-use clip in a lived-in kitchen rather than a styled set.
+2. A quiet, ASMR-ish shot of {brand} doing its one job well.
+3. A "why I replaced my old one" story that ends on {brand}.`,
+    "Outdoor & Gear":
+`1. A field test in genuinely bad weather, shot handheld.
+2. A pack-and-go sequence showing how {brand} actually carries.
+3. A durability check after a month of real use, honestly reported.`,
+    "Travel":
+`1. A packing sequence built around {brand}, filmed in one take.
+2. An airport-to-hotel POV showing it in motion.
+3. A "what I'd change" review after one full trip.`,
+    "Pet":
+`1. A genuine first-reaction clip — my dog meeting {brand} for the first time.
+2. A week-of-use routine showing where it fits in daily care.
+3. An un-staged messy moment, which is usually the one that performs.`,
+    "DTC & Lifestyle":
+`1. A day-in-the-life where {brand} turns up naturally instead of being announced.
+2. A 20-second problem/solution cut for paid social.
+3. An honest 30-day check-in on whether I still reach for it.`,
+    "UK & Europe":
+`1. A restrained, low-key product film that suits {brand}'s tone.
+2. A real-use clip in natural light with no hard sell.
+3. A short honest review that trusts the viewer to decide.`,
+    "Apps & Tech":
+`1. A screen-recorded walkthrough solving one real problem in under 30 seconds.
+2. "How I actually use this every day" — no feature list.
+3. A before-and-after of my workflow with {brand} in it.`
   }
 };
 
@@ -344,6 +407,7 @@ function templates(){
   const saved = state.templates || {};
   const t = {...DEFAULT_TEMPLATES, ...saved};
   t.hooks = {...DEFAULT_TEMPLATES.hooks, ...(saved.hooks || {})};
+  t.ideaScaffolds = {...DEFAULT_TEMPLATES.ideaScaffolds, ...(saved.ideaScaffolds || {})};
   // Older saves held one flat template rather than a variant list. Test what
   // was SAVED, not the merged object — the spread above always supplies
   // DEFAULT_TEMPLATES.variants, so checking t.variants would silently throw
@@ -418,8 +482,15 @@ function firstName(c){
   if (!c.person) return "there";
   return c.person.split(" ")[0];
 }
-function merge(tpl, c){
+// The three-ideas opener only works because the ideas are specific, so the
+// scaffold is a starting point the app nags her to replace — see ideasAreStock.
+const scaffoldFor = c => (templates().ideaScaffolds[c.cat] || "").replace(/\{brand\}/g, c.brand);
+const ideasFor    = c => (rec(c.id).ideas || "").trim() || scaffoldFor(c);
+const ideasAreStock = (c, text) => (text ?? ideasFor(c)).trim() === scaffoldFor(c).trim();
+
+function merge(tpl, c, ideasText){
   const s = templates(), st = settings();
+  const ideas = (ideasText ?? ideasFor(c)).trim();
   const map = {
     "{brand}": c.brand,
     "{name}": firstName(c),
@@ -429,9 +500,11 @@ function merge(tpl, c){
     "{portfolio}": st.portfolio || "[portfolio link — set this in Settings]",
     "{ratecard}": st.ratecard || "",
     "{signature}": st.signature || "",
-    "{hook}": (s.hooks[c.cat] || "").replace(/\{brand\}/g, c.brand)
+    "{hook}": (s.hooks[c.cat] || "").replace(/\{brand\}/g, c.brand),
+    // Lead-in travels with the ideas so an empty box leaves no orphan line.
+    "{ideas}": ideas ? ((s.ideasLead || "").trim() + "\n" + ideas) : ""
   };
-  return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}/g,
+  return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}|\{ideas\}/g,
                              m => map[m] ?? m);
 }
 // Balance variants *within a category*. Random assignment would let one variant
@@ -444,18 +517,18 @@ function pickVariant(c){
   return vs[counts.indexOf(Math.min(...counts))];
 }
 
-function composeFor(c, followUp, variantId){
+function composeFor(c, followUp, variantId, ideasText){
   const t = templates();
   if (followUp){
     return {variant: null,
-            subject: merge(t.subjectFollow, c),
-            body: merge(t.bodyFollow, c).replace(/\n{3,}/g, "\n\n")};
+            subject: merge(t.subjectFollow, c, ideasText),
+            body: merge(t.bodyFollow, c, ideasText).replace(/\n{3,}/g, "\n\n")};
   }
   const v = variantId ? variantById(variantId) : pickVariant(c);
   const bodyTpl = c.kind === "named" ? v.bodyNamed : v.bodyGeneric;
   return {variant: v.id,
-          subject: merge(v.subjectPitch, c),
-          body: merge(bodyTpl, c).replace(/\n{3,}/g, "\n\n")};
+          subject: merge(v.subjectPitch, c, ideasText),
+          body: merge(bodyTpl, c, ideasText).replace(/\n{3,}/g, "\n\n")};
 }
 const mailtoLink = (c, m) =>
   `mailto:${c.email}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
@@ -471,7 +544,9 @@ const gmailLink = (c, m) => {
 /* ============================================================
    FILTERS + RENDER
    ============================================================ */
-const filters = {q:"", status:"", kind:"", cat:"", due:false};
+const filters = {q:"", status:"", kind:"", cat:"", due:false, noIdeas:false};
+// "Needs ideas" means not-yet-pitched and nothing written — the prep queue.
+const needsIdeas = c => !(rec(c.id).ideas || "").trim() && rec(c.id).status === "New";
 
 function visible(){
   const q = filters.q.trim().toLowerCase();
@@ -481,6 +556,7 @@ function visible(){
     if (filters.kind   && c.kind   !== filters.kind)   return false;
     if (filters.cat    && c.cat    !== filters.cat)    return false;
     if (filters.due    && !isDue(c)) return false;
+    if (filters.noIdeas && !needsIdeas(c)) return false;
     if (q && !(c.brand+" "+(c.person||"")+" "+c.email+" "+(c.site||"")).toLowerCase().includes(q)) return false;
     return true;
   });
@@ -547,6 +623,12 @@ function renderList(){
           <div class="field wide">
             <label>Notes</label>
             <textarea class="js-notes" placeholder="What you pitched, what they said…">${esc(r.notes)}</textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field wide">
+            <label>Three ideas for them${r.ideas ? "" : " — blank, so compose will offer the category starters"}</label>
+            <textarea class="js-ideas" placeholder="1.&#10;2.&#10;3.">${esc(r.ideas || "")}</textarea>
           </div>
         </div>
       </div>
@@ -627,9 +709,14 @@ function openTemplates(){
        so the comparison stays about the opening pitch.</p>
     <div class="field"><label>Follow-up subject</label><input id="tFSubj" value="${esc(t.subjectFollow)}"></div>
     <div class="field"><label>Follow-up body</label><textarea id="tFBody" style="min-height:150px">${esc(t.bodyFollow)}</textarea></div>
-    <div class="field"><label>Category hook — {hook} changes per category</label>
+    <div class="field"><label>Per-category text — pick a category</label>
       <select id="tCat">${CATEGORIES.map(c => `<option>${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><textarea id="tHook" style="min-height:70px">${esc(t.hooks[cat0]||"")}</textarea></div>
+    <div class="field"><label>{hook} for this category</label>
+      <textarea id="tHook" style="min-height:70px">${esc(t.hooks[cat0]||"")}</textarea></div>
+    <div class="field"><label>Starter ideas for this category — she rewrites these per brand</label>
+      <textarea id="tScaffold" style="min-height:96px">${esc(t.ideaScaffolds[cat0]||"")}</textarea></div>
+    <div class="field"><label>Line that introduces the ideas</label>
+      <input id="tIdeasLead" value="${esc(t.ideasLead)}"></div>
 
     <div class="row"><button class="btn primary" id="tSave">Save</button>
       <button class="btn" id="tReset">Restore defaults</button>
@@ -672,10 +759,15 @@ function openTemplates(){
     vars.splice(vi, 1); vi = 0; paint();
   };
 
-  /* ---- hooks ---- */
+  /* ---- per-category hook + idea scaffold ---- */
+  const scaffolds = {...t.ideaScaffolds};
   let curCat = cat0;
   $("tCat").onchange = () => {
-    hooks[curCat] = $("tHook").value; curCat = $("tCat").value; $("tHook").value = hooks[curCat] || "";
+    hooks[curCat] = $("tHook").value;
+    scaffolds[curCat] = $("tScaffold").value;
+    curCat = $("tCat").value;
+    $("tHook").value = hooks[curCat] || "";
+    $("tScaffold").value = scaffolds[curCat] || "";
   };
 
   m.querySelector("#tCancel").onclick = closeModal;
@@ -687,9 +779,11 @@ function openTemplates(){
   m.querySelector("#tSave").onclick = () => {
     stash();
     hooks[curCat] = $("tHook").value;
+    scaffolds[curCat] = $("tScaffold").value;
     state.templates = {
       variants: vars,
-      subjectFollow: $("tFSubj").value, bodyFollow: $("tFBody").value, hooks
+      subjectFollow: $("tFSubj").value, bodyFollow: $("tFBody").value, hooks,
+      ideasLead: $("tIdeasLead").value, ideaScaffolds: scaffolds
     };
     store.saveBranch("templates"); store.flush(); closeModal(); toastMsg("Templates saved");
   };
@@ -796,6 +890,8 @@ function openAdd(){
     <div class="field"><label>Website</label><input id="aSite" placeholder="selkirk.com"></div>
     <div class="field"><label>Category</label>
       <select id="aCat">${CATEGORIES.map(c => `<option ${c==="Pickleball"?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+    <div class="field"><label>Three ideas for them (optional)</label>
+      <textarea id="aIdeas" style="min-height:88px" placeholder="You're looking at them right now — this is the cheapest moment to jot these down. Leave blank and you'll get the category starters at compose time."></textarea></div>
     <p class="err" id="aErr"></p>
     <div class="row"><button class="btn primary" id="aSave">Add brand</button><button class="btn" id="aCancel">Cancel</button></div>`);
   m.querySelector("#aCancel").onclick = closeModal;
@@ -808,19 +904,24 @@ function openAdd(){
     state.custom[id] = {id, brand, person, email,
       site: $("aSite").value.trim().replace(/^https?:\/\//,"").replace(/\/$/,""),
       cat: $("aCat").value, kind: person ? "named" : "generic", mine: true};
-    store.saveBranch("custom"); store.flush(); closeModal(); toastMsg(brand + " added");
+    const ideas = $("aIdeas").value.trim();
+    if (ideas) edit(id).ideas = ideas;
+    store.saveBranch("custom");
+    if (ideas) store.saveItem(id);
+    store.flush(); closeModal(); toastMsg(brand + " added");
   };
 }
 
 /* ============================================================
    COMPOSE + SEND QUEUE
    ============================================================ */
-function openCompose(list, i, forceVariant){
+function openCompose(list, i, forceVariant, ideasSoFar){
   const c = list[i];
   if (!c) { closeModal(); toastMsg("Queue finished"); return; }
   const followUp = isDue(c);
   const vs = templates().variants;
-  const m0 = composeFor(c, followUp, forceVariant);
+  const ideas0 = ideasSoFar ?? ideasFor(c);
+  const m0 = composeFor(c, followUp, forceVariant, ideas0);
 
   const m = modal(`
     ${list.length > 1 ? `<div class="qbar">Send queue — ${i+1} of ${list.length}</div>` : ""}
@@ -831,6 +932,10 @@ function openCompose(list, i, forceVariant){
         <select id="cVar">${vs.map(v =>
           `<option value="${esc(v.id)}" ${v.id === m0.variant ? "selected" : ""}>${esc(v.name)}</option>`
         ).join("")}</select></div>` : ""}
+    ${followUp ? "" : `
+      <div class="field"><label>Your three ideas for ${esc(c.brand)}</label>
+        <textarea id="cIdeas" style="min-height:96px">${esc(ideas0)}</textarea></div>
+      <p class="hint" id="cIdeaWarn" style="margin:-6px 0 12px"></p>`}
     <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
     <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
     <div class="row">
@@ -855,14 +960,46 @@ function openCompose(list, i, forceVariant){
   sync();
   m.querySelector("#cSubj").addEventListener("input", sync);
   m.querySelector("#cBody").addEventListener("input", sync);
-  // Switching variant reloads the wording, so re-open rather than patch in place.
-  m.querySelector("#cVar")?.addEventListener("change", e => openCompose(list, i, e.target.value));
+  // Switching variant reloads the wording — carry the ideas across.
+  m.querySelector("#cVar")?.addEventListener("change",
+    e => openCompose(list, i, e.target.value, $("cIdeas")?.value));
+
+  /* ---- ideas ---- */
+  const ideasBox = m.querySelector("#cIdeas");
+  const warnEl   = m.querySelector("#cIdeaWarn");
+  let lastBuiltBody = m0.body;
+
+  const paintWarn = () => {
+    if (!warnEl) return;
+    if (ideasAreStock(c, ideasBox.value)){
+      warnEl.innerHTML = `<b style="color:var(--warn)">These are still the stock ${esc(c.cat)} ideas.</b>
+        The opener only lands if the ideas are specific to ${esc(c.brand)} — worth 30 seconds on their site first.`;
+    } else if (!ideasBox.value.trim()){
+      warnEl.innerHTML = `<span style="color:var(--muted)">No ideas — the email will simply leave that part out.</span>`;
+    } else {
+      warnEl.innerHTML = `<span style="color:var(--ok)">Specific to ${esc(c.brand)} ✓</span>`;
+    }
+  };
+  paintWarn();
+
+  ideasBox?.addEventListener("input", () => {
+    paintWarn();
+    const rebuilt = composeFor(c, followUp, m0.variant, ideasBox.value);
+    // Only refresh the body while she hasn't hand-edited it, or we'd wipe her work.
+    if ($("cBody").value === lastBuiltBody){
+      $("cBody").value = rebuilt.body;
+      lastBuiltBody = rebuilt.body;
+      sync();
+    }
+  });
 
   const advance = () => openCompose(list, i + 1);
   const setStatus = s => {
     const r = edit(c.id);
     r.status = s;
     if (s === "Pitched" || s === "Followed Up") r.pitched = today();
+    // Keep whatever she actually pitched, so follow-ups can refer back to it.
+    if (ideasBox && ideasBox.value.trim() && !ideasAreStock(c, ideasBox.value)) r.ideas = ideasBox.value.trim();
     // Stamp the variant on the first pitch only (Sent, Replied or Bounced all
     // mean this wording went out). Follow-ups share one template, so counting
     // them would test two things at once.
@@ -919,9 +1056,12 @@ $("list").addEventListener("change", e => {
 
 let noteTimer;
 $("list").addEventListener("input", e => {
-  if (!e.target.classList.contains("js-notes")) return;
+  const isNote  = e.target.classList.contains("js-notes");
+  const isIdeas = e.target.classList.contains("js-ideas");
+  if (!isNote && !isIdeas) return;
   const id = e.target.closest(".card").dataset.id;
-  edit(id).notes = e.target.value;
+  if (isNote) edit(id).notes = e.target.value;
+  else        edit(id).ideas = e.target.value;
   clearTimeout(noteTimer);
   noteTimer = setTimeout(() => { store.saveItem(id); store.flush(); }, 700);
 });
@@ -935,6 +1075,9 @@ $("fStatus").addEventListener("change", () => { filters.status = $("fStatus").va
 $("fKind").addEventListener("change",   () => { filters.kind   = $("fKind").value;   render(); });
 $("fDue").addEventListener("click", () => {
   filters.due = !filters.due; $("fDue").classList.toggle("on", filters.due); render();
+});
+$("fNoIdeas").addEventListener("click", () => {
+  filters.noIdeas = !filters.noIdeas; $("fNoIdeas").classList.toggle("on", filters.noIdeas); render();
 });
 $("cats").innerHTML = ['<button class="chip on" data-c="">All categories</button>']
   .concat(CATEGORIES.map(c => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`)).join("");
@@ -962,11 +1105,11 @@ $("expBackup").onclick = () =>
 
 $("expCsv").onclick = () => {
   const qq = s => '"' + String(s ?? "").replace(/"/g, '""') + '"';
-  const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Variant","Notes"]]
+  const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Variant","Ideas","Notes"]]
     .concat(visible().map(c => {
       const r = rec(c.id);
       return [c.brand, c.person, c.email, c.site, c.cat, c.kind, r.status, r.pitched,
-              r.variant || "", r.notes];
+              r.variant || "", r.ideas || "", r.notes];
     }));
   download("ugc-outreach-" + today() + ".csv", rows.map(r => r.map(qq).join(",")).join("\n"), "text/csv");
 };
