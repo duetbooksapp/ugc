@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.10.1";
+const APP_VERSION = "1.11.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -445,7 +445,8 @@ const edit = id => (state.items[id] ||= {...DEFAULT_ITEM});
 // treats "default" records as deletable, so an unchecked field (ideas, once) was
 // silently erased by the very save that should have kept it.
 const isDefault = r => r.status === "New" && !r.pitched && !r.notes
-                    && !(r.ideas || "").trim() && !r.variant;
+                    && !(r.ideas || "").trim() && !r.variant
+                    && !(r.email || "").trim();
 
 const settings  = () => ({...DEFAULT_SETTINGS, ...state.settings});
 
@@ -532,6 +533,9 @@ function firstName(c){
 // scaffold is a starting point the app nags her to replace — see ideasAreStock.
 const scaffoldFor = c => (templates().ideaScaffolds[c.cat] || "").replace(/\{brand\}/g, c.brand);
 const ideasFor    = c => (rec(c.id).ideas || "").trim() || scaffoldFor(c);
+// A per-record email override beats the imported address — the imported list is
+// read-only in the database, so corrections live on the user's own record.
+const emailFor    = c => (rec(c.id).email || "").trim() || c.email;
 const ideasAreStock = (c, text) => (text ?? ideasFor(c)).trim() === scaffoldFor(c).trim();
 
 function merge(tpl, c, ideasText){
@@ -593,12 +597,12 @@ const unfilledIn = (...parts) => {
 };
 
 const mailtoLink = (c, m) =>
-  `mailto:${c.email}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
+  `mailto:${emailFor(c)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
 const gmailLink = (c, m) => {
   const from = settings().email;
   return "https://mail.google.com/mail/?view=cm&fs=1"
        + (from ? "&authuser=" + encodeURIComponent(from) : "")
-       + "&to=" + encodeURIComponent(c.email)
+       + "&to=" + encodeURIComponent(emailFor(c))
        + "&su=" + encodeURIComponent(m.subject)
        + "&body=" + encodeURIComponent(m.body);
 };
@@ -806,7 +810,7 @@ function visible(){
     if (filters.due    && !isDue(c)) return false;
     if (filters.noIdeas && !needsIdeas(c)) return false;
     if (filters.fresh  && r.status !== "New") return false;
-    if (q && !(c.brand+" "+(c.person||"")+" "+c.email+" "+(c.site||"")).toLowerCase().includes(q)) return false;
+    if (q && !(c.brand+" "+(c.person||"")+" "+c.email+" "+emailFor(c)+" "+(c.site||"")).toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -853,7 +857,7 @@ function renderList(){
            title="Select for bulk send" style="width:17px;height:17px;flex:none;margin-top:2px">` : ""}
         <div class="who">
           <div class="brand">${esc(c.brand)}</div>
-          <div class="sub">${esc(c.person || c.email)}</div>
+          <div class="sub">${esc(c.person || emailFor(c))}</div>
           <div class="tags">${tags.join("")}</div>
         </div>
       </div>
@@ -1241,7 +1245,7 @@ function openBulkSend(){
        <b>Set ${esc(missing.join(" and "))} in Settings first</b> — every email would go out with a placeholder.</p>` : ""}
     ${ready.length ? `<div class="field"><label>Will send</label>
       <div style="max-height:190px;overflow:auto">${
-        ready.map(r => row(r.c.brand, esc(r.c.email))).join("")}</div></div>` : ""}
+        ready.map(r => row(r.c.brand, esc(emailFor(r.c)))).join("")}</div></div>` : ""}
     ${blocked.length ? `<div class="field"><label>Skipped (${blocked.length})</label>
       <div style="max-height:150px;overflow:auto">${
         blocked.map(b => row(b.c.brand, `<span style="color:var(--warn)">${esc(b.why)}</span>`)).join("")}</div></div>` : ""}
@@ -1290,7 +1294,7 @@ async function runBulkSend(m, ready){
     const el = rows.lastElementChild;
 
     try {
-      await gmailSend(c.email, subject, body);
+      await gmailSend(emailFor(c), subject, body);
       const r = edit(c.id);
       r.status = "Pitched";
       r.pitched = today();
@@ -1330,7 +1334,7 @@ function openBrand(c){
   const r = rec(c.id), due = isDue(c);
   const m = modal(`
     <div class="qbrand">${esc(c.brand)}</div>
-    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.email)} · ${esc(c.cat)}
+    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.cat)}
        ${due ? `· <span style="color:var(--warn)">follow-up due</span>` : ""}</p>
     <div class="row" style="margin-bottom:12px">
       <button class="btn primary" id="bdCompose">✉ Compose ${due ? "follow-up" : "pitch"}</button>
@@ -1344,6 +1348,11 @@ function openBrand(c){
       <div class="field"><label>Date pitched</label>
         <input type="date" id="bdDate" value="${r.pitched}"></div>
     </div>
+    <div class="field"><label>Email<span id="bdEmailNote" class="hint" style="display:inline">${
+      (r.email || "").trim() ? ` — edited; original was ${esc(c.email)}` : ""}</span><span
+      id="bdSavedM" style="color:var(--ok);margin-left:8px"></span></label>
+      <input type="email" id="bdEmail" value="${esc((r.email || "").trim() || c.email)}"
+        placeholder="${esc(c.email)}"></div>
     <div class="field"><label>Three ideas for them<span id="bdIdeasHint">${
       r.ideas ? "" : " — blank, so compose will offer the category starters"}</span><span
       id="bdSavedI" style="color:var(--ok);margin-left:8px"></span></label>
@@ -1388,6 +1397,18 @@ function openBrand(c){
   const bdIdeas = m.querySelector("#bdIdeas");
   debounced("ideas", bdIdeas, "#bdSavedI");
   debounced("notes", m.querySelector("#bdNotes"), "#bdSavedN");
+
+  // Email: stored as an override only when it differs from the imported
+  // address — clearing the field (or retyping the original) removes the
+  // override and falls back to the imported one.
+  const bdEmail = m.querySelector("#bdEmail");
+  bdEmail.addEventListener("input", () => {
+    const v = bdEmail.value.trim();
+    edit(c.id).email = (v && v !== c.email) ? v : "";
+    m.querySelector("#bdEmailNote").textContent =
+      (v && v !== c.email) ? ` — edited; original was ${c.email}` : "";
+    clearTimeout(t); t = setTimeout(() => { save(); flash("#bdSavedM"); }, 600);
+  });
 
   // The label hint is computed at open, so keep it honest while she types.
   bdIdeas.addEventListener("input", () => {
@@ -1447,7 +1468,7 @@ function openCompose(list, i, forceVariant, ideasSoFar){
   const m = modal(`
     ${list.length > 1 ? `<div class="qbar">Send queue — ${i+1} of ${list.length}</div>` : ""}
     <div class="qbrand">${esc(c.brand)}</div>
-    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.email)}${followUp ? " · follow-up" : ""}</p>
+    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(emailFor(c))}${followUp ? " · follow-up" : ""}</p>
     ${(!followUp && vs.length > 1) ? `
       <div class="field"><label>Template variant (A/B)</label>
         <select id="cVar">${vs.map(v =>
@@ -1691,7 +1712,7 @@ $("expCsv").onclick = () => {
   const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Variant","Ideas","Notes"]]
     .concat(visible().map(c => {
       const r = rec(c.id);
-      return [c.brand, c.person, c.email, c.site, c.cat, c.kind, r.status, r.pitched,
+      return [c.brand, c.person, emailFor(c), c.site, c.cat, c.kind, r.status, r.pitched,
               r.variant || "", r.ideas || "", r.notes];
     }));
   download("ugc-outreach-" + today() + ".csv", rows.map(r => r.map(qq).join(",")).join("\n"), "text/csv");
