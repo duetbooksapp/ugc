@@ -246,7 +246,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.10.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -1339,15 +1339,23 @@ function openBrand(c){
       <div class="field"><label>Date pitched</label>
         <input type="date" id="bdDate" value="${r.pitched}"></div>
     </div>
-    <div class="field"><label>Three ideas for them${
-      r.ideas ? "" : " — blank, so compose will offer the category starters"}</label>
+    <div class="field"><label>Three ideas for them<span id="bdIdeasHint">${
+      r.ideas ? "" : " — blank, so compose will offer the category starters"}</span><span
+      id="bdSavedI" style="color:var(--ok);margin-left:8px"></span></label>
       <textarea id="bdIdeas" style="min-height:96px" placeholder="1.&#10;2.&#10;3.">${esc(r.ideas || "")}</textarea></div>
-    ${c.suggested ? `<div class="field"><label>Suggested — from ${esc(c.site || "their site")}</label>
-      <div class="suggestbox" style="min-height:0">${esc(c.suggested)}</div></div>` : ""}
-    <div class="field"><label>Notes</label>
+    ${(c.suggested || (c.site && CAN_SUGGEST())) ? `<div class="field"><label>Suggested — from ${esc(c.site || "their site")}</label>
+      <div class="suggestbox" style="min-height:0" id="bdSugBox">${
+        c.suggested ? esc(c.suggested) : `<span style="color:var(--muted)">Nothing yet. Read their site to draft three ideas.</span>`}</div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn primary ${c.suggested ? "" : "hide"}" id="bdUseSug">Use these</button>
+        <button class="btn ${c.suggested ? "" : "hide"}" id="bdAppendSug">Add to mine</button>
+        <button class="btn ${(c.site && CAN_SUGGEST()) ? "" : "hide"}" id="bdGenSug">✨ Read their site</button>
+      </div></div>` : ""}
+    <div class="field"><label>Notes<span
+      id="bdSavedN" style="color:var(--ok);margin-left:8px"></span></label>
       <textarea id="bdNotes" style="min-height:110px"
         placeholder="What you pitched, what they said…">${esc(r.notes)}</textarea></div>
-    <div class="row"><button class="btn" id="bdClose">Close</button></div>`);
+    <div class="row"><button class="btn" id="bdClose">Done</button></div>`);
 
   // Write straight through on change; closeModal re-renders the grid.
   const save = () => { store.saveItem(c.id); store.flush(); };
@@ -1359,13 +1367,60 @@ function openBrand(c){
   };
   m.querySelector("#bdDate").onchange = e => { edit(c.id).pitched = e.target.value; save(); };
 
+  // Autosave was always here — the "Saved ✓" flash exists so she can see it work.
   let t;
-  const debounced = (field, el) => el.addEventListener("input", () => {
+  const flashTimers = {};
+  const flash = id => {
+    const el = m.querySelector(id); if (!el) return;
+    el.textContent = "Saved ✓";
+    clearTimeout(flashTimers[id]);
+    flashTimers[id] = setTimeout(() => { el.textContent = ""; }, 1600);
+  };
+  const debounced = (field, el, savedId) => el.addEventListener("input", () => {
     edit(c.id)[field] = el.value;
-    clearTimeout(t); t = setTimeout(save, 600);
+    clearTimeout(t); t = setTimeout(() => { save(); flash(savedId); }, 600);
   });
-  debounced("ideas", m.querySelector("#bdIdeas"));
-  debounced("notes", m.querySelector("#bdNotes"));
+  const bdIdeas = m.querySelector("#bdIdeas");
+  debounced("ideas", bdIdeas, "#bdSavedI");
+  debounced("notes", m.querySelector("#bdNotes"), "#bdSavedN");
+
+  // The label hint is computed at open, so keep it honest while she types.
+  bdIdeas.addEventListener("input", () => {
+    m.querySelector("#bdIdeasHint").textContent =
+      bdIdeas.value.trim() ? "" : " — blank, so compose will offer the category starters";
+  });
+
+  // Suggested ideas: same rules as the compose modal — never overwrite her
+  // words without asking, never invent ideas when the site can't be read.
+  const setIdeas = v => {
+    bdIdeas.value = v;
+    bdIdeas.dispatchEvent(new Event("input", {bubbles: true}));
+  };
+  m.querySelector("#bdUseSug")?.addEventListener("click", () => {
+    const hers = bdIdeas.value.trim();
+    if (hers && !ideasAreStock(c, hers) &&
+        !confirm("Replace what you've written with the suggested ideas?")) return;
+    setIdeas(c.suggested);
+  });
+  m.querySelector("#bdAppendSug")?.addEventListener("click", () => {
+    const hers = bdIdeas.value.trim();
+    setIdeas((hers && !ideasAreStock(c, hers)) ? hers + "\n" + c.suggested : c.suggested);
+  });
+  m.querySelector("#bdGenSug")?.addEventListener("click", async e => {
+    const btn = e.target, box = m.querySelector("#bdSugBox");
+    btn.disabled = true; btn.textContent = "Reading their site…";
+    try {
+      const res = await suggestFromSite(c);
+      c.suggested = res.join("\n");
+      box.textContent = c.suggested;
+      m.querySelector("#bdUseSug").classList.remove("hide");
+      m.querySelector("#bdAppendSug").classList.remove("hide");
+      btn.classList.add("hide");
+    } catch (err) {
+      box.innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
+      btn.disabled = false; btn.textContent = "Try again";
+    }
+  });
 
   m.querySelector("#bdCompose").onclick = () => openCompose([c], 0);
   m.querySelector("#bdClose").onclick = closeModal;
