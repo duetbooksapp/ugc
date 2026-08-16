@@ -219,13 +219,14 @@ const FIREBASE_CONFIG = {
   "authDomain": "duet-ugc.firebaseapp.com",
   "databaseURL": "https://duet-ugc-default-rtdb.firebaseio.com",
   "projectId": "duet-ugc",
-  "appId": "1:876863656225:web:7a048642a7111952222e60"
+  "appId": "1:876863656225:web:7a048642a7111952222e60",
+  "workerUrl": "https://ugc-ideas.smaxim.workers.dev"
 };
 const CLOUD = !FIREBASE_CONFIG.apiKey.startsWith("PASTE_");
 
 /* Cloudflare Worker that reads a brand's site and drafts ideas. Left as-is,
    the Suggest button simply doesn't appear — everything else works. */
-const WORKER_URL = "PASTE_WORKER_URL";
+const WORKER_URL = "https://ugc-ideas.smaxim.workers.dev";
 const CAN_SUGGEST = () => CLOUD && !WORKER_URL.startsWith("PASTE_") && !!getIdToken;
 let getIdToken = null;   // set once she's signed in
 
