@@ -243,6 +243,10 @@ const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
    the list is loaded from the database behind the login instead. */
 let CONTACTS = [];
 
+// Bump on every deploy. Shown under the title so you can tell at a glance which
+// build is actually running — browsers cache this page aggressively.
+const APP_VERSION = "1.7.0";
+
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
 const STATUSES = ["New","Pitched","Followed Up","Replied","Negotiating","Collab!","Passed","Bounced"];
@@ -1556,7 +1560,8 @@ function showApp(){
   $("login").classList.add("hide");
   $("app").classList.remove("hide");
   $("tagline").textContent = allContacts().length + " contacts · "
-    + (CLOUD ? "synced to your account" : "saved in this browser");
+    + (CLOUD ? "synced to your account" : "saved in this browser")
+    + " · v" + APP_VERSION;
 }
 
 async function bootLocal(){
