@@ -246,7 +246,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.10.1";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -440,7 +440,11 @@ let store = null;   // set once we know local vs cloud
 // would write all 294 rows to the database.
 const rec  = id => state.items[id] || DEFAULT_ITEM;
 const edit = id => (state.items[id] ||= {...DEFAULT_ITEM});
-const isDefault = r => r.status === "New" && !r.pitched && !r.notes;
+// Checks EVERY field a record can carry. Missing one is destructive: CloudStore
+// treats "default" records as deletable, so an unchecked field (ideas, once) was
+// silently erased by the very save that should have kept it.
+const isDefault = r => r.status === "New" && !r.pitched && !r.notes
+                    && !(r.ideas || "").trim() && !r.variant;
 
 const settings  = () => ({...DEFAULT_SETTINGS, ...state.settings});
 
