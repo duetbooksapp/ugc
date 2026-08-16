@@ -160,6 +160,7 @@
   <button class="btn" id="btnTemplates">✉ Templates</button>
   <button class="btn" id="btnAB">📊 A/B results</button>
   <button class="btn" id="btnAdd">+ Add brand</button>
+  <button class="btn" id="btnFeedback">💬 Feedback</button>
   <button class="btn hide" id="btnOut">Sign out</button>
 </header>
 
@@ -245,7 +246,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.8.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -584,6 +585,89 @@ const gmailLink = (c, m) => {
        + "&su=" + encodeURIComponent(m.subject)
        + "&body=" + encodeURIComponent(m.body);
 };
+
+/* ============================================================
+   FEEDBACK
+   ============================================================ */
+// Where feedback goes if the Worker isn't deployed — the form still works,
+// it just hands off to her mail app instead of filing an issue.
+const FEEDBACK_EMAIL = "smaxim@maximent.com";
+
+function feedbackContext(){
+  const chips = [...document.querySelectorAll("#cats .chip.on, .chip.on")]
+    .map(c => c.textContent.trim()).filter(t => t && t !== "All categories");
+  const open = document.querySelector(".modal .qbrand");
+  return {
+    version: APP_VERSION,
+    screen: [
+      $("q").value ? `search "${$("q").value}"` : "",
+      $("fStatus").value || "",
+      chips.join(", "),
+    ].filter(Boolean).join(" · ") || "main list",
+    brand: open ? open.textContent : "",
+    ua: navigator.userAgent,
+  };
+}
+
+function openFeedback(){
+  const canFile = CAN_SUGGEST();     // same Worker + login gate as idea generation
+  const m = modal(`
+    <h2>Send feedback</h2>
+    <p class="hint">Goes straight to Steve${canFile ? " as a tracked item" : ""}. Say what you
+       expected and what happened instead — that's usually enough to fix it.</p>
+    <div class="field"><label>What kind of thing is this?</label>
+      <select id="fbType">
+        <option value="bug">Something is broken</option>
+        <option value="change">I'd like this changed</option>
+        <option value="idea">An idea for later</option>
+      </select></div>
+    <div class="field"><label>What's up?</label>
+      <textarea id="fbMsg" style="min-height:150px"
+        placeholder="e.g. When I click Send selected nothing happens on my phone."></textarea></div>
+    <p class="hint">Sent along automatically: app version, which screen you were on,
+       and your browser — so nobody has to ask.</p>
+    <p class="err" id="fbErr"></p>
+    <div class="row">
+      <button class="btn primary" id="fbSend">${canFile ? "Send" : "Open in mail app"}</button>
+      <button class="btn" id="fbCancel">Cancel</button>
+    </div>`);
+
+  m.querySelector("#fbCancel").onclick = closeModal;
+  m.querySelector("#fbSend").onclick = async e => {
+    const msg = $("fbMsg").value.trim();
+    if (!msg) { $("fbErr").textContent = "Tell us what happened first."; return; }
+    const type = $("fbType").value, ctx = feedbackContext();
+
+    if (!canFile){
+      const subject = `UGC tracker feedback (${type}) — v${ctx.version}`;
+      const lines = [msg, "", "---",
+        `Version: ${ctx.version}`, `Screen: ${ctx.screen}`,
+        ctx.brand ? `Brand: ${ctx.brand}` : "", `Browser: ${ctx.ua}`].filter(Boolean);
+      location.href = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(subject)}`
+                    + `&body=${encodeURIComponent(lines.join("\n"))}`;
+      closeModal(); toastMsg("Opening your mail app");
+      return;
+    }
+
+    e.target.disabled = true; e.target.textContent = "Sending…";
+    try {
+      const token = await getIdToken();
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        headers: {"content-type": "application/json", "authorization": "Bearer " + token},
+        body: JSON.stringify({kind: "feedback", type, message: msg,
+                              from: settings().email || settings().name || "", context: ctx}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.detail || data.error || ("HTTP " + res.status));
+      closeModal();
+      toastMsg("Sent — thank you");
+    } catch (err) {
+      $("fbErr").textContent = "Couldn't send it: " + err.message + ". Try the mail app instead.";
+      e.target.disabled = false; e.target.textContent = "Try again";
+    }
+  };
+}
 
 /* ============================================================
    GMAIL SENDING
@@ -1498,6 +1582,7 @@ $("btnSettings").onclick  = openSettings;
 $("btnTemplates").onclick = openTemplates;
 $("btnAB").onclick        = openAB;
 $("btnAdd").onclick       = openAdd;
+$("btnFeedback").onclick  = openFeedback;
 $("btnQueue").onclick     = startQueue;
 
 /* ---------- backup / export ---------- */
