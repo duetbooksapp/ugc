@@ -211,6 +211,12 @@ const FIREBASE_CONFIG = {
 };
 const CLOUD = !FIREBASE_CONFIG.apiKey.startsWith("PASTE_");
 
+/* Cloudflare Worker that reads a brand's site and drafts ideas. Left as-is,
+   the Suggest button simply doesn't appear — everything else works. */
+const WORKER_URL = "PASTE_WORKER_URL";
+const CAN_SUGGEST = () => CLOUD && !WORKER_URL.startsWith("PASTE_") && !!getIdToken;
+let getIdToken = null;   // set once she's signed in
+
 /* Embedded in the local build; empty in the deployed build, where
    the list is loaded from the database behind the login instead. */
 let CONTACTS = [];
@@ -544,6 +550,30 @@ const gmailLink = (c, m) => {
        + "&su=" + encodeURIComponent(m.subject)
        + "&body=" + encodeURIComponent(m.body);
 };
+
+/* ============================================================
+   AI SUGGESTIONS (via the Cloudflare Worker)
+   ============================================================ */
+const SUGGEST_ERRORS = {
+  site_unreadable: "Their site blocked the request or had nothing readable — write your own ideas for this one.",
+  generation_failed: "Couldn't draft ideas just now. Try again in a moment.",
+  unauthenticated: "Your login expired. Refresh the page and sign in again.",
+};
+
+async function suggestFromSite(c){
+  const token = await getIdToken();
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: {"content-type": "application/json", "authorization": "Bearer " + token},
+    body: JSON.stringify({brand: c.brand, category: c.cat, url: c.site}),
+  });
+  let data = {};
+  try { data = await res.json(); } catch(e){}
+  if (data.error) throw new Error(SUGGEST_ERRORS[data.error] || ("Couldn't draft ideas: " + data.error));
+  if (!res.ok)    throw new Error("Couldn't reach the idea service (" + res.status + ").");
+  if (!Array.isArray(data.ideas) || !data.ideas.length) throw new Error("No ideas came back.");
+  return data.ideas.map((s, i) => `${i + 1}. ${String(s).replace(/^\d+[.)]\s*/, "").trim()}`);
+}
 
 /* ============================================================
    FILTERS + RENDER
@@ -897,9 +927,30 @@ function openAdd(){
       <select id="aCat">${CATEGORIES.map(c => `<option ${c==="Pickleball"?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
     <div class="field"><label>Three ideas for them (optional)</label>
       <textarea id="aIdeas" style="min-height:88px" placeholder="You're looking at them right now — this is the cheapest moment to jot these down. Leave blank and you'll get the category starters at compose time."></textarea></div>
+    <div class="row" style="margin:-4px 0 10px">
+      <button class="btn ${CAN_SUGGEST() ? "" : "hide"}" id="aGenSug">✨ Read their site and draft ideas</button>
+      <span class="hint" id="aGenMsg" style="margin:0"></span>
+    </div>
     <p class="err" id="aErr"></p>
     <div class="row"><button class="btn primary" id="aSave">Add brand</button><button class="btn" id="aCancel">Cancel</button></div>`);
   m.querySelector("#aCancel").onclick = closeModal;
+
+  // Draft ideas from the site she just typed in, before the brand is saved.
+  m.querySelector("#aGenSug")?.addEventListener("click", async e => {
+    const btn = e.target, msg = m.querySelector("#aGenMsg");
+    const site = $("aSite").value.trim(), brand = $("aBrand").value.trim();
+    if (!brand || !site) { msg.textContent = "Fill in the brand name and website first."; return; }
+    btn.disabled = true; msg.textContent = "Reading " + site + "…";
+    try {
+      const ideas = await suggestFromSite({brand, cat: $("aCat").value, site});
+      $("aIdeas").value = ideas.join("\n");
+      msg.innerHTML = `<span style="color:var(--ok)">Drafted — edit them to sound like you.</span>`;
+    } catch (err) {
+      msg.innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
+    }
+    btn.disabled = false;
+  });
+
   m.querySelector("#aSave").onclick = () => {
     const brand = $("aBrand").value.trim(), email = $("aEmail").value.trim();
     if (!brand || !email)          return $("aErr").textContent = "Brand and email are both needed.";
@@ -944,15 +995,19 @@ function openCompose(list, i, forceVariant, ideasSoFar){
           <textarea id="cIdeas" style="min-height:132px">${esc(ideas0)}</textarea>
           <p class="hint" id="cIdeaWarn" style="margin:4px 0 0"></p>
         </div>
-        ${c.suggested ? `
         <div class="field">
           <label>Suggested — from ${esc(c.site || "their site")}</label>
-          <div class="suggestbox">${esc(c.suggested)}</div>
+          <div class="suggestbox" id="cSugBox">${
+            c.suggested ? esc(c.suggested)
+                        : `<span style="color:var(--muted)">Nothing yet.${
+                            c.site ? " Read their site to draft three ideas." : " No website on file for this brand."}</span>`
+          }</div>
           <div class="row" style="margin-top:6px">
-            <button class="btn primary" id="cUseSug">Use these</button>
-            <button class="btn" id="cAppendSug">Add to mine</button>
+            <button class="btn primary ${c.suggested ? "" : "hide"}" id="cUseSug">Use these</button>
+            <button class="btn ${c.suggested ? "" : "hide"}" id="cAppendSug">Add to mine</button>
+            <button class="btn ${(c.site && CAN_SUGGEST()) ? "" : "hide"}" id="cGenSug">✨ Read their site</button>
           </div>
-        </div>` : ""}
+        </div>
       </div>`}
     <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
     <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
@@ -1023,6 +1078,25 @@ function openCompose(list, i, forceVariant, ideasSoFar){
     const hers = ideasBox.value.trim();
     ideasBox.value = (hers && !ideasAreStock(c, hers)) ? hers + "\n" + c.suggested : c.suggested;
     ideasChanged();
+  });
+
+  // Ask the Worker to read the brand's site and draft ideas.
+  m.querySelector("#cGenSug")?.addEventListener("click", async e => {
+    const btn = e.target, box = m.querySelector("#cSugBox");
+    btn.disabled = true; btn.textContent = "Reading their site…";
+    try {
+      const res = await suggestFromSite(c);
+      c.suggested = res.join("\n");
+      box.textContent = c.suggested;
+      m.querySelector("#cUseSug").classList.remove("hide");
+      m.querySelector("#cAppendSug").classList.remove("hide");
+      btn.classList.add("hide");
+    } catch (err) {
+      // Never invent ideas when the site can't be read — say so and leave the
+      // category scaffold in place.
+      box.innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
+      btn.disabled = false; btn.textContent = "Try again";
+    }
   });
 
   const advance = () => openCompose(list, i + 1);
@@ -1226,6 +1300,8 @@ async function bootCloud(){
   $("btnOut").onclick = () => { store?.signOut(); authMod.signOut(auth); };
 
   authMod.onAuthStateChanged(auth, async user => {
+    // Fresh token per call — getIdToken() refreshes it when near expiry.
+    getIdToken = user ? (() => user.getIdToken()) : null;
     if (!user){
       store?.signOut(); store = null;
       $("app").classList.add("hide"); $("login").classList.remove("hide");
