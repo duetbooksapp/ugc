@@ -63,15 +63,22 @@
   .hint{font-size:12px;color:var(--muted);margin:0 0 10px}
 
   .count{font-size:12px;color:var(--muted);margin:0 0 8px 2px}
+
+  /* Grid, not a list — at ~300 brands a single column is all scrolling. */
+  #list{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:10px}
+  #list .empty{grid-column:1/-1}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-        margin-bottom:8px;box-shadow:var(--shadow);overflow:hidden}
+        box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
   .card.due{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn) inset}
-  .head{display:flex;gap:12px;align-items:center;padding:12px 14px;cursor:pointer}
+  .head{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;cursor:pointer;flex:1}
   .head:hover{background:var(--accent-soft)}
   .who{flex:1;min-width:0}
-  .brand{font-weight:600;letter-spacing:-.01em}
-  .sub{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+  .brand{font-weight:600;letter-spacing:-.01em;font-size:14.5px;
+         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+  .cardfoot{padding:0 12px 11px}
+  .cardfoot select{width:100%}
   .tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
        padding:2px 7px;border-radius:999px;background:var(--dead-soft);color:var(--muted)}
   .tag.generic{background:var(--info-soft);color:var(--info)}
@@ -85,9 +92,6 @@
   select.status[data-s="Collab!"]{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
   select.status[data-s="Passed"],select.status[data-s="Bounced"]{background:var(--dead-soft);color:var(--dead)}
 
-  .detail{display:none;padding:0 14px 14px;border-top:1px solid var(--line)}
-  .card.open .detail{display:block}
-  .detail .row{margin-top:12px}
   .field{display:flex;flex-direction:column;gap:4px}
   .field.wide{flex:1;min-width:220px}
   label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
@@ -171,6 +175,7 @@
       <option value="generic">Generic inbox</option>
       <option value="personal">Personal (gmail etc.)</option>
     </select>
+    <button class="chip" id="fNew">✨ Not pitched</button>
     <button class="chip" id="fDue">⏰ Follow-ups due</button>
     <button class="chip" id="fNoIdeas">💡 Needs ideas</button>
   </div>
@@ -682,7 +687,7 @@ async function suggestFromSite(c){
 /* ============================================================
    FILTERS + RENDER
    ============================================================ */
-const filters = {q:"", status:"", kind:"", cat:"", due:false, noIdeas:false};
+const filters = {q:"", status:"", kind:"", cat:"", due:false, noIdeas:false, fresh:false};
 // "Needs ideas" means not-yet-pitched and nothing written — the prep queue.
 const needsIdeas = c => !(rec(c.id).ideas || "").trim() && rec(c.id).status === "New";
 
@@ -695,6 +700,7 @@ function visible(){
     if (filters.cat    && c.cat    !== filters.cat)    return false;
     if (filters.due    && !isDue(c)) return false;
     if (filters.noIdeas && !needsIdeas(c)) return false;
+    if (filters.fresh  && r.status !== "New") return false;
     if (q && !(c.brand+" "+(c.person||"")+" "+c.email+" "+(c.site||"")).toLowerCase().includes(q)) return false;
     return true;
   });
@@ -722,7 +728,6 @@ function renderStats(){
 function renderList(){
   const rows = visible();
   $("count").textContent = rows.length + " of " + allContacts().length + " brands";
-  const open = new Set([...document.querySelectorAll(".card.open")].map(c => c.dataset.id));
 
   if (!rows.length){ $("list").innerHTML = '<div class="empty">Nothing matches those filters.</div>'; return; }
 
@@ -737,53 +742,26 @@ function renderList(){
     if (due)                   tags.push(`<span class="tag duealert">follow up · ${n}d</span>`);
 
     return `
-    <div class="card ${due?"due":""} ${open.has(String(c.id))?"open":""}" data-id="${c.id}">
-      <div class="head js-toggle">
+    <div class="card ${due?"due":""}" data-id="${c.id}">
+      <div class="head js-open">
         ${CAN_SEND() ? `<input type="checkbox" class="js-pick" ${selected.has(String(c.id)) ? "checked" : ""}
-           title="Select for bulk send" style="width:17px;height:17px;flex:none">` : ""}
+           title="Select for bulk send" style="width:17px;height:17px;flex:none;margin-top:2px">` : ""}
         <div class="who">
           <div class="brand">${esc(c.brand)}</div>
-          <div class="sub">${esc(c.person || "—")} · ${esc(c.email)}</div>
+          <div class="sub">${esc(c.person || c.email)}</div>
           <div class="tags">${tags.join("")}</div>
         </div>
-        <select class="status js-status" data-s="${r.status}">
+      </div>
+      <div class="cardfoot">
+        <select class="status js-status" data-s="${r.status}" title="Status">
           ${STATUSES.map(s => `<option ${s===r.status?"selected":""}>${s}</option>`).join("")}
         </select>
-      </div>
-      <div class="detail">
-        <div class="row">
-          <button class="btn primary js-compose">✉ Compose ${due?"follow-up":"pitch"}</button>
-          ${c.site ? `<a class="btn" href="https://${esc(c.site)}" target="_blank" rel="noopener">Visit ${esc(c.site)}</a>` : ""}
-          ${c.mine ? `<button class="btn js-del">Delete brand</button>` : ""}
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>Date pitched</label>
-            <input type="date" class="js-date" value="${r.pitched}">
-          </div>
-          <div class="field wide">
-            <label>Notes</label>
-            <textarea class="js-notes" placeholder="What you pitched, what they said…">${esc(r.notes)}</textarea>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field wide">
-            <label>Three ideas for them${r.ideas ? "" : " — blank, so compose will offer the category starters"}</label>
-            <textarea class="js-ideas" placeholder="1.&#10;2.&#10;3.">${esc(r.ideas || "")}</textarea>
-          </div>
-        </div>
       </div>
     </div>`;
   }).join("");
 }
 
-let renderPending = false;
-function render(){
-  // Don't yank the DOM out from under her while she's typing a note.
-  if (document.activeElement && document.activeElement.closest?.(".card")) { renderPending = true; return; }
-  renderPending = false;
-  renderStats(); renderList(); paintBulkBar();
-}
+function render(){ renderStats(); renderList(); paintBulkBar(); }
 
 /* ============================================================
    MODALS
@@ -1235,6 +1213,61 @@ async function runBulkSend(m, ready){
 /* ============================================================
    COMPOSE + SEND QUEUE
    ============================================================ */
+function openBrand(c){
+  const r = rec(c.id), due = isDue(c);
+  const m = modal(`
+    <div class="qbrand">${esc(c.brand)}</div>
+    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.email)} · ${esc(c.cat)}
+       ${due ? `· <span style="color:var(--warn)">follow-up due</span>` : ""}</p>
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn primary" id="bdCompose">✉ Compose ${due ? "follow-up" : "pitch"}</button>
+      ${c.site ? `<a class="btn" href="https://${esc(c.site)}" target="_blank" rel="noopener">Visit ${esc(c.site)}</a>` : ""}
+      <span class="spacer"></span>
+      ${c.mine ? `<button class="btn" id="bdDel">Delete brand</button>` : ""}
+    </div>
+    <div class="row">
+      <div class="field"><label>Status</label>
+        <select id="bdStatus">${STATUSES.map(s => `<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Date pitched</label>
+        <input type="date" id="bdDate" value="${r.pitched}"></div>
+    </div>
+    <div class="field"><label>Three ideas for them${
+      r.ideas ? "" : " — blank, so compose will offer the category starters"}</label>
+      <textarea id="bdIdeas" style="min-height:96px" placeholder="1.&#10;2.&#10;3.">${esc(r.ideas || "")}</textarea></div>
+    ${c.suggested ? `<div class="field"><label>Suggested — from ${esc(c.site || "their site")}</label>
+      <div class="suggestbox" style="min-height:0">${esc(c.suggested)}</div></div>` : ""}
+    <div class="field"><label>Notes</label>
+      <textarea id="bdNotes" style="min-height:110px"
+        placeholder="What you pitched, what they said…">${esc(r.notes)}</textarea></div>
+    <div class="row"><button class="btn" id="bdClose">Close</button></div>`);
+
+  // Write straight through on change; closeModal re-renders the grid.
+  const save = () => { store.saveItem(c.id); store.flush(); };
+  m.querySelector("#bdStatus").onchange = e => {
+    const rr = edit(c.id); rr.status = e.target.value;
+    if (rr.status === "Pitched" || rr.status === "Followed Up") rr.pitched = today();
+    m.querySelector("#bdDate").value = rr.pitched;
+    save();
+  };
+  m.querySelector("#bdDate").onchange = e => { edit(c.id).pitched = e.target.value; save(); };
+
+  let t;
+  const debounced = (field, el) => el.addEventListener("input", () => {
+    edit(c.id)[field] = el.value;
+    clearTimeout(t); t = setTimeout(save, 600);
+  });
+  debounced("ideas", m.querySelector("#bdIdeas"));
+  debounced("notes", m.querySelector("#bdNotes"));
+
+  m.querySelector("#bdCompose").onclick = () => openCompose([c], 0);
+  m.querySelector("#bdClose").onclick = closeModal;
+  m.querySelector("#bdDel")?.addEventListener("click", () => {
+    if (!confirm("Delete " + c.brand + "?")) return;
+    delete state.custom[c.id]; delete state.items[c.id];
+    store.saveBranch("custom"); store.saveItem(c.id); store.flush(); closeModal();
+  });
+}
+
 function openCompose(list, i, forceVariant, ideasSoFar){
   const c = list[i];
   if (!c) { closeModal(); toastMsg("Queue finished"); return; }
@@ -1409,45 +1442,25 @@ $("list").addEventListener("click", e => {
     paintBulkBar();
     return;                                  // don't also toggle the card open
   }
-  if (e.target.classList.contains("js-compose")) return openCompose([c], 0);
-  if (e.target.classList.contains("js-del")){
-    if (!confirm("Delete " + c.brand + "?")) return;
-    delete state.custom[c.id]; delete state.items[c.id];
-    store.saveBranch("custom"); store.saveItem(c.id); store.flush(); render(); return;
-  }
-  if (e.target.closest(".js-toggle") && !e.target.closest(".js-status")) card.classList.toggle("open");
+  if (e.target.closest(".js-open")) openBrand(c);
 });
 
 $("list").addEventListener("change", e => {
   const card = e.target.closest(".card"); if (!card) return;
-  const id = card.dataset.id, r = edit(id);
-  if (e.target.classList.contains("js-status")){
-    r.status = e.target.value;
-    if (r.status === "Pitched" || r.status === "Followed Up") r.pitched = today();
-    store.saveItem(id); store.flush(); render();
-  }
-  if (e.target.classList.contains("js-date")){ r.pitched = e.target.value; store.saveItem(id); store.flush(); render(); }
-});
-
-let noteTimer;
-$("list").addEventListener("input", e => {
-  const isNote  = e.target.classList.contains("js-notes");
-  const isIdeas = e.target.classList.contains("js-ideas");
-  if (!isNote && !isIdeas) return;
-  const id = e.target.closest(".card").dataset.id;
-  if (isNote) edit(id).notes = e.target.value;
-  else        edit(id).ideas = e.target.value;
-  clearTimeout(noteTimer);
-  noteTimer = setTimeout(() => { store.saveItem(id); store.flush(); }, 700);
-});
-document.addEventListener("focusout", e => {
-  if (e.target.closest?.(".card") && renderPending) setTimeout(() => { if (renderPending) render(); }, 50);
+  if (!e.target.classList.contains("js-status")) return;
+  const r = edit(card.dataset.id);
+  r.status = e.target.value;
+  if (r.status === "Pitched" || r.status === "Followed Up") r.pitched = today();
+  store.saveItem(card.dataset.id); store.flush(); render();
 });
 
 $("q").addEventListener("input", () => { filters.q = $("q").value; renderList(); });
 $("fStatus").innerHTML += STATUSES.map(s => `<option>${s}</option>`).join("");
 $("fStatus").addEventListener("change", () => { filters.status = $("fStatus").value; render(); });
 $("fKind").addEventListener("change",   () => { filters.kind   = $("fKind").value;   render(); });
+$("fNew").addEventListener("click", () => {
+  filters.fresh = !filters.fresh; $("fNew").classList.toggle("on", filters.fresh); render();
+});
 $("fDue").addEventListener("click", () => {
   filters.due = !filters.due; $("fDue").classList.toggle("on", filters.due); render();
 });
