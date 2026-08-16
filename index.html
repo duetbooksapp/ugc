@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -1442,6 +1442,9 @@ function openBrand(c){
       m.querySelector("#bdUseSug").classList.remove("hide");
       m.querySelector("#bdAppendSug").classList.remove("hide");
       btn.classList.add("hide");
+      // Generated ideas go straight into the editable box — that box is what
+      // the email uses — unless she's already written her own.
+      if (!bdIdeas.value.trim() || ideasAreStock(c, bdIdeas.value)) setIdeas(c.suggested);
     } catch (err) {
       box.innerHTML = `<span style="color:var(--warn)">${esc(err.message)}</span>`;
       btn.disabled = false; btn.textContent = "Try again";
@@ -1589,6 +1592,13 @@ function openCompose(list, i, forceVariant, ideasSoFar){
       m.querySelector("#cUseSug").classList.remove("hide");
       m.querySelector("#cAppendSug").classList.remove("hide");
       btn.classList.add("hide");
+      // Same auto-apply as the detail view: the email is built from the ideas
+      // box, so generated ideas replace an empty or still-stock box directly
+      // (ideasChanged refreshes the body unless she's hand-edited it).
+      if (!ideasBox.value.trim() || ideasAreStock(c, ideasBox.value)) {
+        ideasBox.value = c.suggested;
+        ideasChanged();
+      }
     } catch (err) {
       // Never invent ideas when the site can't be read — say so and leave the
       // category scaffold in place.
