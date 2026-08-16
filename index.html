@@ -223,10 +223,15 @@ const WORKER_URL = "PASTE_WORKER_URL";
 const CAN_SUGGEST = () => CLOUD && !WORKER_URL.startsWith("PASTE_") && !!getIdToken;
 let getIdToken = null;   // set once she's signed in
 
-/* Google OAuth client for sending through her own Gmail. Left as-is, the
-   send-selected controls don't appear and everything else works. */
+/* Google OAuth client for sending Gmail. Each person supplies their OWN client
+   id in Settings, created in their own Google Cloud project — so the consent
+   screen carries their name, not whoever deployed this. The build-time constant
+   below is only an optional default; normally it stays unset. */
 const GOOGLE_CLIENT_ID = "PASTE_GOOGLE_CLIENT_ID";
-const CAN_SEND = () => !GOOGLE_CLIENT_ID.startsWith("PASTE_");
+const clientId = () =>
+  (settings().googleClientId || "").trim() ||
+  (GOOGLE_CLIENT_ID.startsWith("PASTE_") ? "" : GOOGLE_CLIENT_ID);
+const CAN_SEND = () => /\.apps\.googleusercontent\.com$/.test(clientId());
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
 /* Embedded in the local build; empty in the deployed build, where
@@ -255,7 +260,7 @@ const DEFAULT_ITEM = {status:"New", pitched:"", notes:""};
 // to protect the app — cold sending in fast bursts is what gets accounts
 // restricted. Deliberately low defaults; she can raise them knowingly.
 const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:"",
-                          dailyCap:15, sendGapSec:12};
+                          dailyCap:15, sendGapSec:12, googleClientId:""};
 
 const DEFAULT_VARIANTS = [
   {
@@ -595,7 +600,7 @@ async function gmailAuthorize(force){
   await loadGis();
   return new Promise((ok, fail) => {
     gmailTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
+      client_id: clientId(),
       scope: GMAIL_SCOPE,
       callback: resp => {
         if (resp.error) return fail(new Error("Gmail access was declined."));
@@ -801,6 +806,13 @@ function openSettings(){
     <div class="field"><label>Portfolio link</label><input id="sPortfolio" value="${esc(s.portfolio)}" placeholder="https://…"></div>
     <div class="field"><label>Rate card link (optional)</label><input id="sRate" value="${esc(s.ratecard)}" placeholder="https://…"></div>
     <div class="field"><label>Signature</label><textarea id="sSig" placeholder="@yourhandle · yoursite.com">${esc(s.signature)}</textarea></div>
+    <p class="hint" style="margin-top:16px"><b>Sending your own email</b></p>
+    <div class="field"><label>Your Google OAuth client ID</label>
+      <input id="sClient" value="${esc(s.googleClientId)}"
+             placeholder="…apps.googleusercontent.com — leave blank to send manually"></div>
+    <p class="hint">This comes from <b>your own</b> Google Cloud project, so the permission
+       screen shows your name and the access is yours alone. Setup steps are in
+       GMAIL-SETUP.md. Leave it blank and emails open in your mail app instead.</p>
     ${CAN_SEND() ? `
     <div class="row">
       <div class="field"><label>Max emails per day</label>
@@ -808,9 +820,9 @@ function openSettings(){
       <div class="field"><label>Seconds between sends</label>
         <input id="sGap" type="number" min="0" max="600" value="${s.sendGapSec}"></div>
     </div>
-    <p class="hint">These protect your Gmail account, not the app. Cold email sent fast
-       and in volume is what gets accounts restricted — raise them slowly, and only once
-       replies show the list is landing.</p>` : ""}
+    <p class="hint">These protect your sending reputation, not the app. Cold email sent
+       fast and in volume is what gets accounts restricted — raise them slowly, and only
+       once replies show the list is landing.</p>` : ""}
     <p class="hint">Your email address here sets the signature and tells the Gmail button which account to open.
        The email itself still sends from whichever account your mail app is signed into.</p>
     <div class="row"><button class="btn primary" id="sSave">Save</button><button class="btn" id="sCancel">Cancel</button></div>`);
@@ -821,6 +833,7 @@ function openSettings(){
       name: $("sName").value.trim(), email: $("sEmail").value.trim(),
       portfolio: $("sPortfolio").value.trim(), ratecard: $("sRate").value.trim(),
       signature: $("sSig").value.trim(),
+      googleClientId: $("sClient").value.trim(),
       ...(CAN_SEND() ? {dailyCap: Math.max(1, +$("sCap").value || 15),
                         sendGapSec: Math.max(0, +$("sGap").value || 0)} : {})
     };
@@ -1451,7 +1464,9 @@ $("cats").addEventListener("click", e => {
 });
 
 function paintBulkBar(){
-  if (!CAN_SEND()){ $("bulkBar").classList.add("hide"); return; }
+  // toggle, not add — otherwise turning sending on mid-session never un-hides it
+  $("bulkBar").classList.toggle("hide", !CAN_SEND());
+  if (!CAN_SEND()) return;
   const cap = settings().dailyCap || 15, used = sentToday();
   $("btnBulk").textContent = `✉ Send selected (${selected.size})`;
   $("btnBulk").disabled = selected.size === 0;
