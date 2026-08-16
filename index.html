@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UGC Brand Outreach Tracker</title>
+<style>
+  :root{
+    --bg:#faf7f4; --panel:#fff; --line:#e8e0d8; --ink:#2c2621; --muted:#8a7f75;
+    --accent:#c26a4a; --accent-soft:#f6e7e0;
+    --ok:#3f8f6b; --ok-soft:#e3f2ea;
+    --warn:#b8862b; --warn-soft:#fbf1dc;
+    --dead:#9a9a9a; --dead-soft:#eeeeee;
+    --info:#4a6fa5; --info-soft:#e6edf7;
+    --shadow:0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#1c1917; --panel:#252220; --line:#3a3532; --ink:#ece7e2; --muted:#9c938b;
+      --accent:#e08a68; --accent-soft:#3a2c26;
+      --ok:#6cc79b; --ok-soft:#24352d;
+      --warn:#dcae5b; --warn-soft:#3a3222;
+      --dead:#8a8580; --dead-soft:#302c2a;
+      --info:#8ab0e0; --info-soft:#232d3a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 80px}
+  .hide{display:none !important}
+
+  header{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  header h1{font-size:24px;margin:0 0 2px;letter-spacing:-.02em}
+  header p{margin:0 0 18px;color:var(--muted);font-size:13px}
+  .grow{flex:1}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-bottom:18px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+  .stat b{display:block;font-size:24px;line-height:1.1;letter-spacing:-.02em}
+  .stat span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .stat.hl b{color:var(--accent)}
+
+  .controls,.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+            padding:12px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row + .row{margin-top:10px}
+  input,select,textarea{font:inherit;color:inherit;background:var(--bg);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  input[type=search]{flex:1;min-width:180px}
+  .chip{border:1px solid var(--line);background:var(--bg);color:var(--muted);
+        border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer;white-space:nowrap}
+  .chip:hover{border-color:var(--accent)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+       border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{opacity:.9;color:#fff}
+  .btn.ghost{background:transparent}
+  .spacer{flex:1}
+  h3{margin:0 0 4px;font-size:15px}
+  .hint{font-size:12px;color:var(--muted);margin:0 0 10px}
+
+  .count{font-size:12px;color:var(--muted);margin:0 0 8px 2px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        margin-bottom:8px;box-shadow:var(--shadow);overflow:hidden}
+  .card.due{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn) inset}
+  .head{display:flex;gap:12px;align-items:center;padding:12px 14px;cursor:pointer}
+  .head:hover{background:var(--accent-soft)}
+  .who{flex:1;min-width:0}
+  .brand{font-weight:600;letter-spacing:-.01em}
+  .sub{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+  .tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+       padding:2px 7px;border-radius:999px;background:var(--dead-soft);color:var(--muted)}
+  .tag.generic{background:var(--info-soft);color:var(--info)}
+  .tag.personal{background:var(--warn-soft);color:var(--warn)}
+  .tag.dup{background:var(--accent-soft);color:var(--accent)}
+  .tag.mine{background:var(--ok-soft);color:var(--ok)}
+  .tag.duealert{background:var(--warn-soft);color:var(--warn);font-weight:600}
+  select.status{font-size:13px;padding:6px 8px;border-radius:8px;font-weight:500}
+  select.status[data-s="Pitched"],select.status[data-s="Followed Up"]{background:var(--info-soft);color:var(--info);border-color:var(--info)}
+  select.status[data-s="Replied"],select.status[data-s="Negotiating"]{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+  select.status[data-s="Collab!"]{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+  select.status[data-s="Passed"],select.status[data-s="Bounced"]{background:var(--dead-soft);color:var(--dead)}
+
+  .detail{display:none;padding:0 14px 14px;border-top:1px solid var(--line)}
+  .card.open .detail{display:block}
+  .detail .row{margin-top:12px}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field.wide{flex:1;min-width:220px}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  textarea{width:100%;min-height:70px;resize:vertical}
+  a{color:var(--accent)}
+  .empty{text-align:center;color:var(--muted);padding:50px 20px}
+
+  /* ---- modal ---- */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;
+           justify-content:center;padding:16px;z-index:50}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+         width:100%;max-width:680px;max-height:92vh;overflow:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal h2{margin:0 0 2px;font-size:19px}
+  .modal .field{margin-bottom:10px}
+  .modal input,.modal textarea,.modal select{width:100%}
+  .qbar{font-size:12px;color:var(--muted);margin-bottom:10px}
+  .qbrand{font-size:17px;font-weight:600;margin-bottom:2px}
+
+  /* ---- login ---- */
+  #login{max-width:380px;margin:12vh auto;}
+  #login .panel{padding:22px}
+  #login h1{font-size:22px;margin:0 0 4px}
+  #login input{width:100%;margin-bottom:10px}
+  .err{color:var(--accent);font-size:13px;min-height:18px}
+
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+         background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;
+         font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99}
+  .toast.show{opacity:1}
+  @media(max-width:560px){
+    .head{flex-wrap:wrap}
+    select.status{width:100%}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="hide">
+  <div class="panel">
+    <h1>UGC Tracker</h1>
+    <p class="hint">Sign in to load your brands and pitch history.</p>
+    <input id="liEmail" type="email" placeholder="Email" autocomplete="username">
+    <input id="liPass" type="password" placeholder="Password" autocomplete="current-password">
+    <p class="err" id="liErr"></p>
+    <div class="row">
+      <button class="btn primary" id="liGo">Sign in</button>
+      <button class="btn ghost" id="liReset">Forgot password</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="wrap hide" id="app">
+
+<header>
+  <div class="grow">
+    <h1>UGC Brand Outreach Tracker</h1>
+    <p id="tagline">Loading…</p>
+  </div>
+  <button class="btn" id="btnSettings">⚙ Settings</button>
+  <button class="btn" id="btnTemplates">✉ Templates</button>
+  <button class="btn" id="btnAdd">+ Add brand</button>
+  <button class="btn hide" id="btnOut">Sign out</button>
+</header>
+
+<div class="stats" id="stats"></div>
+
+<div class="controls">
+  <div class="row">
+    <input type="search" id="q" placeholder="Search brand, person, or email…">
+    <select id="fStatus"><option value="">All statuses</option></select>
+    <select id="fKind">
+      <option value="">All contact types</option>
+      <option value="named">Named person</option>
+      <option value="generic">Generic inbox</option>
+      <option value="personal">Personal (gmail etc.)</option>
+    </select>
+    <button class="chip" id="fDue">⏰ Follow-ups due</button>
+  </div>
+  <div class="row" id="cats"></div>
+  <div class="row">
+    <button class="btn primary" id="btnQueue">▶ Start send queue</button>
+    <span class="spacer"></span>
+    <button class="btn" id="expBackup">↓ Backup</button>
+    <button class="btn" id="impBackup">↑ Restore</button>
+    <button class="btn" id="expCsv">↓ CSV</button>
+    <button class="btn" id="reset">Reset</button>
+  </div>
+</div>
+
+<p class="count" id="count"></p>
+<div id="list"></div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="file" accept=".json" hidden>
+<div id="modalHost"></div>
+
+<script type="module">
+"use strict";
+
+/* ============================================================
+   CONFIG — paste your Firebase web config here to enable the
+   hosted, logged-in, cross-device version. Left as-is, the app
+   runs offline in this browser with no login.
+   ============================================================ */
+const FIREBASE_CONFIG = {
+  "apiKey": "AIzaSyDqnzp4TQ4O37pV-1-icRvtNcvIeqP9RgI",
+  "authDomain": "duet-ugc.firebaseapp.com",
+  "databaseURL": "https://duet-ugc-default-rtdb.firebaseio.com",
+  "projectId": "duet-ugc",
+  "appId": "1:876863656225:web:7a048642a7111952222e60"
+};
+const CLOUD = !FIREBASE_CONFIG.apiKey.startsWith("PASTE_");
+
+/* Embedded in the local build; empty in the deployed build, where
+   the list is loaded from the database behind the login instead. */
+let CONTACTS = [];
+
+const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
+  "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
+const STATUSES = ["New","Pitched","Followed Up","Replied","Negotiating","Collab!","Passed","Bounced"];
+const FOLLOWUP_DAYS = 7;
+const LKEY = "ugcTracker.v2";
+
+const $  = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const today = () => new Date().toISOString().slice(0,10);
+const daysSince = d => d ? Math.floor((new Date(today()) - new Date(d)) / 86400000) : null;
+
+/* ============================================================
+   DEFAULTS
+   ============================================================ */
+const DEFAULT_ITEM = {status:"New", pitched:"", notes:""};
+
+const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:""};
+
+const DEFAULT_TEMPLATES = {
+  subjectPitch: "UGC content for {brand}",
+  bodyNamed:
+`Hi {name},
+
+I'm {me} — I make user-generated content for brands, and I'd love to create some for {brand}.
+
+{hook}
+
+I can put together a short set of authentic videos and photos you're free to use on paid social, organic, or your product pages. A few samples of my work: {portfolio}
+
+If you're open to it, I'll send over rates and some ideas specific to {brand}.
+
+Thanks for your time,
+{me}
+{signature}`,
+  bodyGeneric:
+`Hello,
+
+I'm {me} — I make user-generated content for brands, and I'd love to create some for {brand}. If there's someone better placed on the creator partnerships side, I'd be grateful if you could pass this along.
+
+{hook}
+
+I can put together a short set of authentic videos and photos you're free to use on paid social, organic, or your product pages. A few samples of my work: {portfolio}
+
+Thanks for your time,
+{me}
+{signature}`,
+  subjectFollow: "Re: UGC content for {brand}",
+  bodyFollow:
+`Hi {name},
+
+Just floating this back up in case it got buried — I know inboxes get busy.
+
+I'm still keen to create some content for {brand}, and happy to shape it around whatever you have coming up. My work: {portfolio}
+
+If it isn't the right time, no problem at all — just let me know and I'll check back later in the year.
+
+Thanks,
+{me}
+{signature}`,
+  hooks: {
+    "Pickleball": "I play regularly, so I can shoot {brand} gear in real games and real conditions rather than a studio setup — paddle sound, footwork, the actual look on court.",
+    "Fashion & Apparel": "I'd focus on real styling and fit content for {brand} — how the pieces actually move and wear across a normal week.",
+    "Supplements & Wellness": "I'd show {brand} as part of an honest daily routine, which tends to land better than anything that looks staged.",
+    "Food & Beverage": "I'd shoot {brand} the way people actually eat and drink it — quick, appetising, and genuinely unfussy.",
+    "Beauty & Skincare": "I'd do honest application and routine content for {brand}, including the unglamorous before shots that make the after believable.",
+    "Home & Kitchen": "I'd show {brand} in an actual lived-in home rather than a styled set — the version people recognise.",
+    "Outdoor & Gear": "I'd take {brand} out and use it properly, so the footage shows real conditions instead of a product table.",
+    "Travel": "I'd capture {brand} in transit — packing, airports, the moments people are actually deciding what to buy.",
+    "Pet": "I'd shoot {brand} with real animals being real animals, which is usually where the charm is.",
+    "DTC & Lifestyle": "I'd make content that shows {brand} fitting into an ordinary day, in a way that feels recommended rather than advertised.",
+    "UK & Europe": "I'd create content that suits {brand}'s tone rather than the louder US style of creator content.",
+    "Apps & Tech": "I'd show {brand} solving an actual problem on screen — short, clear, and genuinely useful to watch."
+  }
+};
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let state = {items:{}, settings:{...DEFAULT_SETTINGS}, templates:structuredClone(DEFAULT_TEMPLATES), custom:{}};
+let store = null;   // set once we know local vs cloud
+
+// Reading must never create a record — otherwise a single render
+// would write all 294 rows to the database.
+const rec  = id => state.items[id] || DEFAULT_ITEM;
+const edit = id => (state.items[id] ||= {...DEFAULT_ITEM});
+const isDefault = r => r.status === "New" && !r.pitched && !r.notes;
+
+const settings  = () => ({...DEFAULT_SETTINGS, ...state.settings});
+const templates = () => ({...DEFAULT_TEMPLATES, ...state.templates,
+                          hooks:{...DEFAULT_TEMPLATES.hooks, ...(state.templates?.hooks||{})}});
+
+const allContacts = () => CONTACTS.concat(Object.values(state.custom || {}));
+
+function isDue(c){
+  const r = rec(c.id);
+  if (r.status !== "Pitched" && r.status !== "Followed Up") return false;
+  const n = daysSince(r.pitched);
+  return n !== null && n >= FOLLOWUP_DAYS;
+}
+
+/* ============================================================
+   STORAGE — local browser, or Firebase when configured
+   ============================================================ */
+function LocalStore(){
+  return {
+    async start(onData){
+      try { Object.assign(state, JSON.parse(localStorage.getItem(LKEY)) || {}); } catch(e){}
+      onData();
+    },
+    flush(){ localStorage.setItem(LKEY, JSON.stringify(state)); },
+    saveItem(){ this.flush(); },
+    saveBranch(){ this.flush(); },
+    signOut(){}
+  };
+}
+
+async function CloudStore(fb, uid){
+  const {ref, update, set, onValue, remove} = fb.db;
+  const base = "users/" + uid;
+  let unsub = null;
+  return {
+    async start(onData){
+      // ONE listener. No polling anywhere in this app — a polling loop
+      // in an earlier project quietly ran up a large bandwidth bill.
+      unsub = onValue(ref(fb.database, base), snap => {
+        const v = snap.val() || {};
+        state.items    = v.items    || {};
+        state.custom   = v.custom   || {};
+        state.settings = v.settings || {...DEFAULT_SETTINGS};
+        state.templates= v.templates|| structuredClone(DEFAULT_TEMPLATES);
+        onData();
+      }, err => toastMsg("Sync error: " + err.message));
+    },
+    flush(){},
+    async saveItem(id){
+      const r = state.items[id];
+      if (!r || isDefault(r)) { delete state.items[id]; await remove(ref(fb.database, `${base}/items/${id}`)); return; }
+      await set(ref(fb.database, `${base}/items/${id}`), r);
+    },
+    async saveBranch(branch){ await set(ref(fb.database, `${base}/${branch}`), state[branch] || null); },
+    signOut(){ if (unsub) unsub(); }
+  };
+}
+
+/* ============================================================
+   TEMPLATE MERGE
+   ============================================================ */
+function firstName(c){
+  if (!c.person) return "there";
+  return c.person.split(" ")[0];
+}
+function merge(tpl, c){
+  const s = templates(), st = settings();
+  const map = {
+    "{brand}": c.brand,
+    "{name}": firstName(c),
+    "{category}": c.cat,
+    "{site}": c.site || "",
+    "{me}": st.name || "[your name — set this in Settings]",
+    "{portfolio}": st.portfolio || "[portfolio link — set this in Settings]",
+    "{ratecard}": st.ratecard || "",
+    "{signature}": st.signature || "",
+    "{hook}": (s.hooks[c.cat] || "").replace(/\{brand\}/g, c.brand)
+  };
+  return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}/g,
+                             m => map[m] ?? m);
+}
+function composeFor(c, followUp){
+  const t = templates();
+  const subject = merge(followUp ? t.subjectFollow : t.subjectPitch, c);
+  const bodyTpl = followUp ? t.bodyFollow : (c.kind === "named" ? t.bodyNamed : t.bodyGeneric);
+  return {subject, body: merge(bodyTpl, c).replace(/\n{3,}/g, "\n\n")};
+}
+const mailtoLink = (c, m) =>
+  `mailto:${c.email}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
+const gmailLink = (c, m) => {
+  const from = settings().email;
+  return "https://mail.google.com/mail/?view=cm&fs=1"
+       + (from ? "&authuser=" + encodeURIComponent(from) : "")
+       + "&to=" + encodeURIComponent(c.email)
+       + "&su=" + encodeURIComponent(m.subject)
+       + "&body=" + encodeURIComponent(m.body);
+};
+
+/* ============================================================
+   FILTERS + RENDER
+   ============================================================ */
+const filters = {q:"", status:"", kind:"", cat:"", due:false};
+
+function visible(){
+  const q = filters.q.trim().toLowerCase();
+  return allContacts().filter(c => {
+    const r = rec(c.id);
+    if (filters.status && r.status !== filters.status) return false;
+    if (filters.kind   && c.kind   !== filters.kind)   return false;
+    if (filters.cat    && c.cat    !== filters.cat)    return false;
+    if (filters.due    && !isDue(c)) return false;
+    if (q && !(c.brand+" "+(c.person||"")+" "+c.email+" "+(c.site||"")).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function renderStats(){
+  const all = allContacts();
+  const n = s => all.filter(c => rec(c.id).status === s).length;
+  const contacted = all.length - n("New");
+  const replied   = n("Replied") + n("Negotiating") + n("Collab!");
+  const due       = all.filter(isDue).length;
+  const cells = [
+    ["Total brands", all.length, ""],
+    ["Not pitched",  n("New"), ""],
+    ["Pitched",      contacted, ""],
+    ["Replied",      replied, "hl"],
+    ["Collabs",      n("Collab!"), "hl"],
+    ["Reply rate",   (contacted ? Math.round(replied/contacted*100) : 0) + "%", ""],
+    ["Follow up now", due, due ? "hl" : ""],
+  ];
+  $("stats").innerHTML = cells.map(([l,v,cls]) =>
+    `<div class="stat ${cls}"><b>${v}</b><span>${l}</span></div>`).join("");
+}
+
+function renderList(){
+  const rows = visible();
+  $("count").textContent = rows.length + " of " + allContacts().length + " brands";
+  const open = new Set([...document.querySelectorAll(".card.open")].map(c => c.dataset.id));
+
+  if (!rows.length){ $("list").innerHTML = '<div class="empty">Nothing matches those filters.</div>'; return; }
+
+  $("list").innerHTML = rows.map(c => {
+    const r = rec(c.id), due = isDue(c), n = daysSince(r.pitched);
+    const tags = [`<span class="tag">${esc(c.cat)}</span>`];
+    if (c.kind === "generic")  tags.push('<span class="tag generic">generic inbox</span>');
+    if (c.kind === "personal") tags.push('<span class="tag personal">personal email</span>');
+    if (c.dupBrand)            tags.push('<span class="tag dup">2 contacts here</span>');
+    if (c.mine)                tags.push('<span class="tag mine">added by you</span>');
+    if (due)                   tags.push(`<span class="tag duealert">follow up · ${n}d</span>`);
+
+    return `
+    <div class="card ${due?"due":""} ${open.has(String(c.id))?"open":""}" data-id="${c.id}">
+      <div class="head js-toggle">
+        <div class="who">
+          <div class="brand">${esc(c.brand)}</div>
+          <div class="sub">${esc(c.person || "—")} · ${esc(c.email)}</div>
+          <div class="tags">${tags.join("")}</div>
+        </div>
+        <select class="status js-status" data-s="${r.status}">
+          ${STATUSES.map(s => `<option ${s===r.status?"selected":""}>${s}</option>`).join("")}
+        </select>
+      </div>
+      <div class="detail">
+        <div class="row">
+          <button class="btn primary js-compose">✉ Compose ${due?"follow-up":"pitch"}</button>
+          ${c.site ? `<a class="btn" href="https://${esc(c.site)}" target="_blank" rel="noopener">Visit ${esc(c.site)}</a>` : ""}
+          ${c.mine ? `<button class="btn js-del">Delete brand</button>` : ""}
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Date pitched</label>
+            <input type="date" class="js-date" value="${r.pitched}">
+          </div>
+          <div class="field wide">
+            <label>Notes</label>
+            <textarea class="js-notes" placeholder="What you pitched, what they said…">${esc(r.notes)}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+let renderPending = false;
+function render(){
+  // Don't yank the DOM out from under her while she's typing a note.
+  if (document.activeElement && document.activeElement.closest?.(".card")) { renderPending = true; return; }
+  renderPending = false;
+  renderStats(); renderList();
+}
+
+/* ============================================================
+   MODALS
+   ============================================================ */
+function modal(html){
+  $("modalHost").innerHTML = `<div class="overlay"><div class="modal">${html}</div></div>`;
+  const ov = $("modalHost").querySelector(".overlay");
+  ov.addEventListener("mousedown", e => { if (e.target === ov) closeModal(); });
+  return $("modalHost").querySelector(".modal");
+}
+const closeModal = () => { $("modalHost").innerHTML = ""; render(); };
+
+function openSettings(){
+  const s = settings();
+  const m = modal(`
+    <h2>Your details</h2>
+    <p class="hint">These get merged into every email you send.</p>
+    <div class="field"><label>Your name</label><input id="sName" value="${esc(s.name)}" placeholder="Jane Smith"></div>
+    <div class="field"><label>Your email address</label><input id="sEmail" type="email" value="${esc(s.email)}" placeholder="you@gmail.com"></div>
+    <div class="field"><label>Portfolio link</label><input id="sPortfolio" value="${esc(s.portfolio)}" placeholder="https://…"></div>
+    <div class="field"><label>Rate card link (optional)</label><input id="sRate" value="${esc(s.ratecard)}" placeholder="https://…"></div>
+    <div class="field"><label>Signature</label><textarea id="sSig" placeholder="@yourhandle · yoursite.com">${esc(s.signature)}</textarea></div>
+    <p class="hint">Your email address here sets the signature and tells the Gmail button which account to open.
+       The email itself still sends from whichever account your mail app is signed into.</p>
+    <div class="row"><button class="btn primary" id="sSave">Save</button><button class="btn" id="sCancel">Cancel</button></div>`);
+  m.querySelector("#sCancel").onclick = closeModal;
+  m.querySelector("#sSave").onclick = () => {
+    state.settings = {
+      name: $("sName").value.trim(), email: $("sEmail").value.trim(),
+      portfolio: $("sPortfolio").value.trim(), ratecard: $("sRate").value.trim(),
+      signature: $("sSig").value.trim()
+    };
+    store.saveBranch("settings"); store.flush(); closeModal(); toastMsg("Saved");
+  };
+}
+
+function openTemplates(){
+  const t = templates();
+  const m = modal(`
+    <h2>Email templates</h2>
+    <p class="hint">Edit freely — your own wording will always beat mine. Available fields:
+       <code>{brand} {name} {me} {portfolio} {ratecard} {signature} {hook}</code></p>
+    <div class="field"><label>Pitch subject</label><input id="tSubj" value="${esc(t.subjectPitch)}"></div>
+    <div class="field"><label>Pitch body — named contact</label><textarea id="tNamed" style="min-height:180px">${esc(t.bodyNamed)}</textarea></div>
+    <div class="field"><label>Pitch body — generic inbox</label><textarea id="tGen" style="min-height:150px">${esc(t.bodyGeneric)}</textarea></div>
+    <div class="field"><label>Follow-up subject</label><input id="tFSubj" value="${esc(t.subjectFollow)}"></div>
+    <div class="field"><label>Follow-up body</label><textarea id="tFBody" style="min-height:150px">${esc(t.bodyFollow)}</textarea></div>
+    <div class="field"><label>Category hook — {hook} changes per category</label>
+      <select id="tCat">${CATEGORIES.map(c => `<option>${esc(c)}</option>`).join("")}</select></div>
+    <div class="field"><textarea id="tHook" style="min-height:70px">${esc(t.hooks[CATEGORIES[0]]||"")}</textarea></div>
+    <div class="row"><button class="btn primary" id="tSave">Save</button>
+      <button class="btn" id="tReset">Restore defaults</button>
+      <button class="btn" id="tCancel">Cancel</button></div>`);
+
+  const hooks = {...t.hooks};
+  const cat = m.querySelector("#tCat"), hook = m.querySelector("#tHook");
+  let current = CATEGORIES[0];
+  cat.onchange = () => { hooks[current] = hook.value; current = cat.value; hook.value = hooks[current] || ""; };
+  m.querySelector("#tCancel").onclick = closeModal;
+  m.querySelector("#tReset").onclick = () => {
+    if (!confirm("Restore all templates to the originals?")) return;
+    state.templates = structuredClone(DEFAULT_TEMPLATES);
+    store.saveBranch("templates"); store.flush(); closeModal(); toastMsg("Templates restored");
+  };
+  m.querySelector("#tSave").onclick = () => {
+    hooks[current] = hook.value;
+    state.templates = {
+      subjectPitch: $("tSubj").value, bodyNamed: $("tNamed").value, bodyGeneric: $("tGen").value,
+      subjectFollow: $("tFSubj").value, bodyFollow: $("tFBody").value, hooks
+    };
+    store.saveBranch("templates"); store.flush(); closeModal(); toastMsg("Templates saved");
+  };
+}
+
+function openAdd(){
+  const m = modal(`
+    <h2>Add a brand</h2>
+    <p class="hint">For brands you find yourself — pickleball or anything else.</p>
+    <div class="field"><label>Brand name *</label><input id="aBrand" placeholder="Selkirk Sport"></div>
+    <div class="field"><label>Contact name</label><input id="aPerson" placeholder="Leave blank for a generic inbox"></div>
+    <div class="field"><label>Email *</label><input id="aEmail" type="email" placeholder="partnerships@…"></div>
+    <div class="field"><label>Website</label><input id="aSite" placeholder="selkirk.com"></div>
+    <div class="field"><label>Category</label>
+      <select id="aCat">${CATEGORIES.map(c => `<option ${c==="Pickleball"?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+    <p class="err" id="aErr"></p>
+    <div class="row"><button class="btn primary" id="aSave">Add brand</button><button class="btn" id="aCancel">Cancel</button></div>`);
+  m.querySelector("#aCancel").onclick = closeModal;
+  m.querySelector("#aSave").onclick = () => {
+    const brand = $("aBrand").value.trim(), email = $("aEmail").value.trim();
+    if (!brand || !email)          return $("aErr").textContent = "Brand and email are both needed.";
+    if (!/^\S+@\S+\.\S+$/.test(email)) return $("aErr").textContent = "That doesn't look like an email address.";
+    const person = $("aPerson").value.trim();
+    const id = "c" + Date.now();
+    state.custom[id] = {id, brand, person, email,
+      site: $("aSite").value.trim().replace(/^https?:\/\//,"").replace(/\/$/,""),
+      cat: $("aCat").value, kind: person ? "named" : "generic", mine: true};
+    store.saveBranch("custom"); store.flush(); closeModal(); toastMsg(brand + " added");
+  };
+}
+
+/* ============================================================
+   COMPOSE + SEND QUEUE
+   ============================================================ */
+function openCompose(list, i){
+  const c = list[i];
+  if (!c) { closeModal(); toastMsg("Queue finished"); return; }
+  const followUp = isDue(c);
+  const m0 = composeFor(c, followUp);
+
+  const m = modal(`
+    ${list.length > 1 ? `<div class="qbar">Send queue — ${i+1} of ${list.length}</div>` : ""}
+    <div class="qbrand">${esc(c.brand)}</div>
+    <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.email)}${followUp ? " · follow-up" : ""}</p>
+    <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
+    <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
+    <div class="row">
+      <a class="btn primary" id="cGmail" target="_blank" rel="noopener">Open in Gmail</a>
+      <a class="btn" id="cMail">Open in mail app</a>
+      <span class="spacer"></span>
+      <button class="btn" id="cSent">✓ Sent — next</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="cReplied">They replied</button>
+      <button class="btn" id="cSkip">Skip</button>
+      <button class="btn" id="cBounced">Bounced</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="cClose">Close</button>
+    </div>`);
+
+  const live = () => ({subject: $("cSubj").value, body: $("cBody").value});
+  const sync = () => {
+    m.querySelector("#cGmail").href = gmailLink(c, live());
+    m.querySelector("#cMail").href  = mailtoLink(c, live());
+  };
+  sync();
+  m.querySelector("#cSubj").addEventListener("input", sync);
+  m.querySelector("#cBody").addEventListener("input", sync);
+
+  const advance = () => openCompose(list, i + 1);
+  const setStatus = s => {
+    const r = edit(c.id);
+    r.status = s;
+    if (s === "Pitched" || s === "Followed Up") r.pitched = today();
+    store.saveItem(c.id); store.flush();
+  };
+
+  m.querySelector("#cSent").onclick    = () => { setStatus(followUp ? "Followed Up" : "Pitched"); advance(); };
+  m.querySelector("#cReplied").onclick = () => { setStatus("Replied"); advance(); };
+  m.querySelector("#cBounced").onclick = () => { setStatus("Bounced"); advance(); };
+  m.querySelector("#cSkip").onclick    = advance;
+  m.querySelector("#cClose").onclick   = closeModal;
+}
+
+function startQueue(){
+  const rows = visible();
+  const due  = rows.filter(isDue);
+  const fresh= rows.filter(c => rec(c.id).status === "New");
+  const list = due.concat(fresh);
+  if (!list.length) return toastMsg("Nothing to send in this filter");
+  if (!settings().name || !settings().portfolio){
+    if (!confirm("Your name or portfolio link isn't set yet, so the emails will have placeholders in them. Open the queue anyway?"))
+      return openSettings();
+  }
+  openCompose(list, 0);
+}
+
+/* ============================================================
+   EVENTS
+   ============================================================ */
+$("list").addEventListener("click", e => {
+  const card = e.target.closest(".card"); if (!card) return;
+  const c = allContacts().find(x => String(x.id) === card.dataset.id); if (!c) return;
+
+  if (e.target.classList.contains("js-compose")) return openCompose([c], 0);
+  if (e.target.classList.contains("js-del")){
+    if (!confirm("Delete " + c.brand + "?")) return;
+    delete state.custom[c.id]; delete state.items[c.id];
+    store.saveBranch("custom"); store.saveItem(c.id); store.flush(); render(); return;
+  }
+  if (e.target.closest(".js-toggle") && !e.target.closest(".js-status")) card.classList.toggle("open");
+});
+
+$("list").addEventListener("change", e => {
+  const card = e.target.closest(".card"); if (!card) return;
+  const id = card.dataset.id, r = edit(id);
+  if (e.target.classList.contains("js-status")){
+    r.status = e.target.value;
+    if (r.status === "Pitched" || r.status === "Followed Up") r.pitched = today();
+    store.saveItem(id); store.flush(); render();
+  }
+  if (e.target.classList.contains("js-date")){ r.pitched = e.target.value; store.saveItem(id); store.flush(); render(); }
+});
+
+let noteTimer;
+$("list").addEventListener("input", e => {
+  if (!e.target.classList.contains("js-notes")) return;
+  const id = e.target.closest(".card").dataset.id;
+  edit(id).notes = e.target.value;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { store.saveItem(id); store.flush(); }, 700);
+});
+document.addEventListener("focusout", e => {
+  if (e.target.closest?.(".card") && renderPending) setTimeout(() => { if (renderPending) render(); }, 50);
+});
+
+$("q").addEventListener("input", () => { filters.q = $("q").value; renderList(); });
+$("fStatus").innerHTML += STATUSES.map(s => `<option>${s}</option>`).join("");
+$("fStatus").addEventListener("change", () => { filters.status = $("fStatus").value; render(); });
+$("fKind").addEventListener("change",   () => { filters.kind   = $("fKind").value;   render(); });
+$("fDue").addEventListener("click", () => {
+  filters.due = !filters.due; $("fDue").classList.toggle("on", filters.due); render();
+});
+$("cats").innerHTML = ['<button class="chip on" data-c="">All categories</button>']
+  .concat(CATEGORIES.map(c => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`)).join("");
+$("cats").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  filters.cat = b.dataset.c;
+  $("cats").querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b));
+  render();
+});
+
+$("btnSettings").onclick  = openSettings;
+$("btnTemplates").onclick = openTemplates;
+$("btnAdd").onclick       = openAdd;
+$("btnQueue").onclick     = startQueue;
+
+/* ---------- backup / export ---------- */
+function download(name, text, type){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type}));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+$("expBackup").onclick = () =>
+  download("ugc-backup-" + today() + ".json", JSON.stringify(state, null, 1), "application/json");
+
+$("expCsv").onclick = () => {
+  const qq = s => '"' + String(s ?? "").replace(/"/g, '""') + '"';
+  const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Notes"]]
+    .concat(visible().map(c => {
+      const r = rec(c.id);
+      return [c.brand, c.person, c.email, c.site, c.cat, c.kind, r.status, r.pitched, r.notes];
+    }));
+  download("ugc-outreach-" + today() + ".csv", rows.map(r => r.map(qq).join(",")).join("\n"), "text/csv");
+};
+
+$("impBackup").onclick = () => $("file").click();
+$("file").onchange = () => {
+  const f = $("file").files[0]; if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const data = JSON.parse(fr.result);
+      if (typeof data !== "object" || Array.isArray(data)) throw new Error("bad file");
+      state.items = data.items || {}; state.custom = data.custom || {};
+      state.settings = data.settings || {...DEFAULT_SETTINGS};
+      state.templates = data.templates || structuredClone(DEFAULT_TEMPLATES);
+      ["items","custom","settings","templates"].forEach(b => store.saveBranch(b));
+      store.flush(); render(); toastMsg("Restored");
+    } catch(err){ toastMsg("That file didn't look like a backup"); }
+    $("file").value = "";
+  };
+  fr.readAsText(f);
+};
+
+$("reset").onclick = () => {
+  if (!confirm("Erase every status, date and note? Back up first if you're unsure.")) return;
+  state.items = {};
+  store.saveBranch("items"); store.flush(); render(); toastMsg("Progress cleared");
+};
+
+let toastTimer;
+function toastMsg(m){
+  const t = $("toast");
+  t.textContent = m; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+window.toastMsg = toastMsg;
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+function showApp(){
+  $("login").classList.add("hide");
+  $("app").classList.remove("hide");
+  $("tagline").textContent = allContacts().length + " contacts · "
+    + (CLOUD ? "synced to your account" : "saved in this browser");
+}
+
+async function bootLocal(){
+  store = LocalStore();
+  await store.start(() => { showApp(); render(); });
+}
+
+async function bootCloud(){
+  const V = "https://www.gstatic.com/firebasejs/11.0.2/";
+  const [appMod, authMod, dbMod] = await Promise.all([
+    import(V + "firebase-app.js"), import(V + "firebase-auth.js"), import(V + "firebase-database.js")
+  ]);
+  const app  = appMod.initializeApp(FIREBASE_CONFIG);
+  const auth = authMod.getAuth(app);
+  const database = dbMod.getDatabase(app);
+  const fb = {database, db: dbMod};
+
+  await authMod.setPersistence(auth, authMod.browserLocalPersistence);
+
+  $("liGo").onclick = async () => {
+    $("liErr").textContent = "";
+    try {
+      await authMod.signInWithEmailAndPassword(auth, $("liEmail").value.trim(), $("liPass").value);
+    } catch(err){
+      $("liErr").textContent = /invalid|wrong|not-found/i.test(err.code||"")
+        ? "That email and password don't match." : (err.message || "Sign-in failed.");
+    }
+  };
+  $("liPass").addEventListener("keydown", e => { if (e.key === "Enter") $("liGo").click(); });
+  $("liReset").onclick = async () => {
+    const em = $("liEmail").value.trim();
+    if (!em) return $("liErr").textContent = "Type your email first, then tap again.";
+    try { await authMod.sendPasswordResetEmail(auth, em); $("liErr").textContent = "Reset link sent — check your inbox."; }
+    catch(err){ $("liErr").textContent = err.message; }
+  };
+  $("btnOut").classList.remove("hide");
+  $("btnOut").onclick = () => { store?.signOut(); authMod.signOut(auth); };
+
+  authMod.onAuthStateChanged(auth, async user => {
+    if (!user){
+      store?.signOut(); store = null;
+      $("app").classList.add("hide"); $("login").classList.remove("hide");
+      $("liPass").value = "";
+      return;
+    }
+    // Contacts live in the database, not in this file, so the public
+    // page never exposes them.
+    try {
+      const snap = await dbMod.get(dbMod.ref(database, "contacts"));
+      CONTACTS = Object.values(snap.val() || {});
+    } catch(err){ toastMsg("Couldn't load the brand list: " + err.message); }
+    store = await CloudStore(fb, user.uid);
+    await store.start(() => { showApp(); render(); });
+  });
+}
+
+if (CLOUD) bootCloud().catch(err => {
+  $("login").classList.remove("hide");
+  $("liErr").textContent = "Couldn't reach the server: " + err.message;
+});
+else bootLocal();
+</script>
+</body>
+</html>
