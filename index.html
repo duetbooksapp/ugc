@@ -150,6 +150,7 @@
   </div>
   <button class="btn" id="btnSettings">⚙ Settings</button>
   <button class="btn" id="btnTemplates">✉ Templates</button>
+  <button class="btn" id="btnAB">📊 A/B results</button>
   <button class="btn" id="btnAdd">+ Add brand</button>
   <button class="btn hide" id="btnOut">Sign out</button>
 </header>
@@ -214,6 +215,8 @@ const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverag
 const STATUSES = ["New","Pitched","Followed Up","Replied","Negotiating","Collab!","Passed","Bounced"];
 const FOLLOWUP_DAYS = 7;
 const LKEY = "ugcTracker.v2";
+// No A/B verdict below this many sends — small samples read as signal when they aren't.
+const AB_MIN_SENDS = 200;
 
 const $  = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
@@ -227,9 +230,12 @@ const DEFAULT_ITEM = {status:"New", pitched:"", notes:""};
 
 const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:""};
 
-const DEFAULT_TEMPLATES = {
-  subjectPitch: "UGC content for {brand}",
-  bodyNamed:
+const DEFAULT_VARIANTS = [
+  {
+    id: "A",
+    name: "A — direct",
+    subjectPitch: "UGC content for {brand}",
+    bodyNamed:
 `Hi {name},
 
 I'm {me} — I make user-generated content for brands, and I'd love to create some for {brand}.
@@ -243,7 +249,7 @@ If you're open to it, I'll send over rates and some ideas specific to {brand}.
 Thanks for your time,
 {me}
 {signature}`,
-  bodyGeneric:
+    bodyGeneric:
 `Hello,
 
 I'm {me} — I make user-generated content for brands, and I'd love to create some for {brand}. If there's someone better placed on the creator partnerships side, I'd be grateful if you could pass this along.
@@ -254,7 +260,43 @@ I can put together a short set of authentic videos and photos you're free to use
 
 Thanks for your time,
 {me}
+{signature}`
+  },
+  {
+    id: "B",
+    name: "B — story-led",
+    subjectPitch: "A content idea for {brand}",
+    bodyNamed:
+`Hi {name},
+
+{hook}
+
+That's the kind of thing I'd want to make for {brand}. I'm {me}, and I create user-generated content — the unpolished, believable kind that reads like a recommendation instead of an ad.
+
+Here's some of my work: {portfolio}
+
+If there's a launch or a product you're pushing right now, tell me which and I'll come back with two or three specific concepts.
+
+Thanks,
+{me}
 {signature}`,
+    bodyGeneric:
+`Hello,
+
+{hook}
+
+That's the kind of thing I'd want to make for {brand}. I'm {me}, and I create user-generated content — the unpolished, believable kind that reads like a recommendation instead of an ad. If someone else there handles creator partnerships, I'd appreciate you passing this on.
+
+Here's some of my work: {portfolio}
+
+Thanks,
+{me}
+{signature}`
+  }
+];
+
+const DEFAULT_TEMPLATES = {
+  variants: DEFAULT_VARIANTS,
   subjectFollow: "Re: UGC content for {brand}",
   bodyFollow:
 `Hi {name},
@@ -297,8 +339,24 @@ const edit = id => (state.items[id] ||= {...DEFAULT_ITEM});
 const isDefault = r => r.status === "New" && !r.pitched && !r.notes;
 
 const settings  = () => ({...DEFAULT_SETTINGS, ...state.settings});
-const templates = () => ({...DEFAULT_TEMPLATES, ...state.templates,
-                          hooks:{...DEFAULT_TEMPLATES.hooks, ...(state.templates?.hooks||{})}});
+
+function templates(){
+  const saved = state.templates || {};
+  const t = {...DEFAULT_TEMPLATES, ...saved};
+  t.hooks = {...DEFAULT_TEMPLATES.hooks, ...(saved.hooks || {})};
+  // Older saves held one flat template rather than a variant list. Test what
+  // was SAVED, not the merged object — the spread above always supplies
+  // DEFAULT_TEMPLATES.variants, so checking t.variants would silently throw
+  // away her customised wording.
+  if (!Array.isArray(saved.variants) || !saved.variants.length){
+    t.variants = saved.subjectPitch
+      ? [{id:"A", name:"A — yours", subjectPitch:saved.subjectPitch,
+          bodyNamed:saved.bodyNamed, bodyGeneric:saved.bodyGeneric}]
+      : structuredClone(DEFAULT_VARIANTS);
+  }
+  return t;
+}
+const variantById = id => templates().variants.find(v => v.id === id) || templates().variants[0];
 
 const allContacts = () => CONTACTS.concat(Object.values(state.custom || {}));
 
@@ -376,11 +434,28 @@ function merge(tpl, c){
   return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}/g,
                              m => map[m] ?? m);
 }
-function composeFor(c, followUp){
+// Balance variants *within a category*. Random assignment would let one variant
+// drift toward beauty brands and the other toward pet brands, and that confound
+// would corrupt the comparison faster than the sample size does.
+function pickVariant(c){
+  const vs = templates().variants;
+  const counts = vs.map(v =>
+    allContacts().filter(x => x.cat === c.cat && rec(x.id).variant === v.id).length);
+  return vs[counts.indexOf(Math.min(...counts))];
+}
+
+function composeFor(c, followUp, variantId){
   const t = templates();
-  const subject = merge(followUp ? t.subjectFollow : t.subjectPitch, c);
-  const bodyTpl = followUp ? t.bodyFollow : (c.kind === "named" ? t.bodyNamed : t.bodyGeneric);
-  return {subject, body: merge(bodyTpl, c).replace(/\n{3,}/g, "\n\n")};
+  if (followUp){
+    return {variant: null,
+            subject: merge(t.subjectFollow, c),
+            body: merge(t.bodyFollow, c).replace(/\n{3,}/g, "\n\n")};
+  }
+  const v = variantId ? variantById(variantId) : pickVariant(c);
+  const bodyTpl = c.kind === "named" ? v.bodyNamed : v.bodyGeneric;
+  return {variant: v.id,
+          subject: merge(v.subjectPitch, c),
+          body: merge(bodyTpl, c).replace(/\n{3,}/g, "\n\n")};
 }
 const mailtoLink = (c, m) =>
   `mailto:${c.email}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
@@ -524,40 +599,191 @@ function openSettings(){
 
 function openTemplates(){
   const t = templates();
+  const vars  = structuredClone(t.variants);   // working copy until Save
+  const hooks = {...t.hooks};
+  const sends = Object.fromEntries(abStats().map(s => [s.id, s.sends]));
+  let vi = 0, cat0 = CATEGORIES[0];
+
   const m = modal(`
     <h2>Email templates</h2>
-    <p class="hint">Edit freely — your own wording will always beat mine. Available fields:
+    <p class="hint">Edit freely — your own wording will beat mine. Fields you can use:
        <code>{brand} {name} {me} {portfolio} {ratecard} {signature} {hook}</code></p>
-    <div class="field"><label>Pitch subject</label><input id="tSubj" value="${esc(t.subjectPitch)}"></div>
-    <div class="field"><label>Pitch body — named contact</label><textarea id="tNamed" style="min-height:180px">${esc(t.bodyNamed)}</textarea></div>
-    <div class="field"><label>Pitch body — generic inbox</label><textarea id="tGen" style="min-height:150px">${esc(t.bodyGeneric)}</textarea></div>
+
+    <div class="field"><label>Variant being edited (A/B)</label>
+      <select id="tVar"></select></div>
+    <div class="row" style="margin:-4px 0 12px">
+      <button class="btn" id="tAddVar">+ Add variant</button>
+      <button class="btn" id="tDelVar">Delete this variant</button>
+      <span class="spacer"></span>
+      <span class="hint" id="tSends" style="margin:0"></span>
+    </div>
+
+    <div class="field"><label>Variant name</label><input id="tName"></div>
+    <div class="field"><label>Pitch subject</label><input id="tSubj"></div>
+    <div class="field"><label>Pitch body — named contact</label><textarea id="tNamed" style="min-height:180px"></textarea></div>
+    <div class="field"><label>Pitch body — generic inbox</label><textarea id="tGen" style="min-height:150px"></textarea></div>
+
+    <p class="hint" style="margin-top:16px"><b>Shared by every variant</b> — follow-ups aren't A/B tested,
+       so the comparison stays about the opening pitch.</p>
     <div class="field"><label>Follow-up subject</label><input id="tFSubj" value="${esc(t.subjectFollow)}"></div>
     <div class="field"><label>Follow-up body</label><textarea id="tFBody" style="min-height:150px">${esc(t.bodyFollow)}</textarea></div>
     <div class="field"><label>Category hook — {hook} changes per category</label>
       <select id="tCat">${CATEGORIES.map(c => `<option>${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><textarea id="tHook" style="min-height:70px">${esc(t.hooks[CATEGORIES[0]]||"")}</textarea></div>
+    <div class="field"><textarea id="tHook" style="min-height:70px">${esc(t.hooks[cat0]||"")}</textarea></div>
+
     <div class="row"><button class="btn primary" id="tSave">Save</button>
       <button class="btn" id="tReset">Restore defaults</button>
       <button class="btn" id="tCancel">Cancel</button></div>`);
 
-  const hooks = {...t.hooks};
-  const cat = m.querySelector("#tCat"), hook = m.querySelector("#tHook");
-  let current = CATEGORIES[0];
-  cat.onchange = () => { hooks[current] = hook.value; current = cat.value; hook.value = hooks[current] || ""; };
+  /* ---- variant editing ---- */
+  const stash = () => {
+    const v = vars[vi];
+    v.name = $("tName").value.trim() || v.id;
+    v.subjectPitch = $("tSubj").value;
+    v.bodyNamed = $("tNamed").value;
+    v.bodyGeneric = $("tGen").value;
+  };
+  const paint = () => {
+    $("tVar").innerHTML = vars.map((v,i) =>
+      `<option value="${i}" ${i===vi?"selected":""}>${esc(v.name)}</option>`).join("");
+    const v = vars[vi];
+    $("tName").value = v.name; $("tSubj").value = v.subjectPitch;
+    $("tNamed").value = v.bodyNamed; $("tGen").value = v.bodyGeneric;
+    const n = sends[v.id] || 0;
+    $("tSends").textContent = n ? `${n} sent with this variant` : "not sent yet";
+  };
+  paint();
+
+  $("tVar").onchange = e => { stash(); vi = +e.target.value; paint(); };
+  $("tAddVar").onclick = () => {
+    stash();
+    const used = new Set(vars.map(v => v.id));
+    const id = "ABCDEFGH".split("").find(x => !used.has(x)) || ("V" + vars.length);
+    const base = vars[vi];
+    vars.push({id, name: id + " — new", subjectPitch: base.subjectPitch,
+               bodyNamed: base.bodyNamed, bodyGeneric: base.bodyGeneric});
+    vi = vars.length - 1; paint();
+  };
+  $("tDelVar").onclick = () => {
+    if (vars.length < 2) return toastMsg("You need at least one variant");
+    const v = vars[vi], n = sends[v.id] || 0;
+    if (n && !confirm(`${v.name} has ${n} sends recorded. Deleting the template keeps those `
+                    + `sends on the brands, but they'll drop out of the A/B comparison. Continue?`)) return;
+    vars.splice(vi, 1); vi = 0; paint();
+  };
+
+  /* ---- hooks ---- */
+  let curCat = cat0;
+  $("tCat").onchange = () => {
+    hooks[curCat] = $("tHook").value; curCat = $("tCat").value; $("tHook").value = hooks[curCat] || "";
+  };
+
   m.querySelector("#tCancel").onclick = closeModal;
   m.querySelector("#tReset").onclick = () => {
-    if (!confirm("Restore all templates to the originals?")) return;
+    if (!confirm("Restore all templates and variants to the originals?")) return;
     state.templates = structuredClone(DEFAULT_TEMPLATES);
     store.saveBranch("templates"); store.flush(); closeModal(); toastMsg("Templates restored");
   };
   m.querySelector("#tSave").onclick = () => {
-    hooks[current] = hook.value;
+    stash();
+    hooks[curCat] = $("tHook").value;
     state.templates = {
-      subjectPitch: $("tSubj").value, bodyNamed: $("tNamed").value, bodyGeneric: $("tGen").value,
+      variants: vars,
       subjectFollow: $("tFSubj").value, bodyFollow: $("tFBody").value, hooks
     };
     store.saveBranch("templates"); store.flush(); closeModal(); toastMsg("Templates saved");
   };
+}
+
+/* ============================================================
+   A/B RESULTS
+   ============================================================ */
+const REPLIED_STATES = ["Replied","Negotiating","Collab!"];
+
+function abStats(){
+  const all = allContacts();
+  return templates().variants.map(v => {
+    const rows = all.filter(c => rec(c.id).variant === v.id);
+    const sends   = rows.length;
+    const replies = rows.filter(c => REPLIED_STATES.includes(rec(c.id).status)).length;
+    const collabs = rows.filter(c => rec(c.id).status === "Collab!").length;
+    return {id:v.id, name:v.name, sends, replies, collabs,
+            collabRate: sends ? collabs/sends : 0,
+            replyRate:  sends ? replies/sends : 0};
+  });
+}
+
+// Two-proportion z-test. Used only to decide whether we're allowed to call a
+// winner at all — never to dress a small sample up as a result.
+function zTest(a, b, key){
+  const na = a.sends, nb = b.sends;
+  if (!na || !nb) return null;
+  const xa = key === "collabs" ? a.collabs : a.replies;
+  const xb = key === "collabs" ? b.collabs : b.replies;
+  const p = (xa + xb) / (na + nb);
+  const se = Math.sqrt(p * (1 - p) * (1/na + 1/nb));
+  if (!se) return null;
+  const z = Math.abs((xa/na - xb/nb) / se);
+  // p < 0.05 two-tailed
+  return {z, significant: z > 1.96};
+}
+
+function openAB(){
+  const stats = abStats();
+  const total = stats.reduce((n,s) => n + s.sends, 0);
+  const pct = n => (n * 100).toFixed(1) + "%";
+
+  const rows = stats.map(s => `
+    <tr>
+      <td style="padding:6px 10px 6px 0"><b>${esc(s.name)}</b></td>
+      <td style="padding:6px 10px;text-align:right">${s.sends}</td>
+      <td style="padding:6px 10px;text-align:right"><b>${s.collabs}</b> · ${pct(s.collabRate)}</td>
+      <td style="padding:6px 0 6px 10px;text-align:right;color:var(--muted)">${s.replies} · ${pct(s.replyRate)}</td>
+    </tr>`).join("");
+
+  let verdict;
+  if (total < AB_MIN_SENDS){
+    verdict = `<p class="hint" style="font-size:13px">
+      <b>Locked until ${AB_MIN_SENDS} sends — ${total} so far.</b>
+      Below that, one or two collabs landing either way swings the rate enough to look
+      like a winner when it's chance. Keep sending; this unlocks on its own.</p>`;
+  } else {
+    const sorted = [...stats].sort((a,b) => b.collabRate - a.collabRate);
+    const [top, next] = sorted;
+    const t = zTest(top, next, "collabs");
+    if (t?.significant){
+      verdict = `<p class="hint" style="font-size:13px;color:var(--ok)">
+        <b>${esc(top.name)} is genuinely ahead on collabs</b> (${pct(top.collabRate)} vs ${pct(next.collabRate)}).
+        That gap is larger than chance would explain. Worth making it the default.</p>`;
+    } else {
+      const r = zTest(top, next, "replies");
+      verdict = `<p class="hint" style="font-size:13px">
+        <b>No clear winner on collabs yet.</b> ${esc(top.name)} leads ${pct(top.collabRate)} to
+        ${pct(next.collabRate)}, but at these counts that's within what chance produces —
+        it isn't evidence.
+        ${r?.significant
+          ? ` On replies, though, ${esc([...stats].sort((a,b) => b.replyRate - a.replyRate)[0].name)} is genuinely ahead — an early tell worth watching.`
+          : ` Reply rates haven't separated either.`}</p>`;
+    }
+  }
+
+  const m = modal(`
+    <h2>A/B results</h2>
+    <p class="hint">Collabs is the headline. Reply rate is shown alongside because it moves sooner.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:6px">
+      <tr style="border-bottom:1px solid var(--line)">
+        <th style="text-align:left;padding-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Variant</th>
+        <th style="text-align:right;padding-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Sent</th>
+        <th style="text-align:right;padding-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Collabs</th>
+        <th style="text-align:right;padding-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Replies</th>
+      </tr>
+      ${rows}
+    </table>
+    ${verdict}
+    <div class="row"><button class="btn" id="abClose">Close</button>
+      <button class="btn" id="abTpl">Edit templates</button></div>`);
+  m.querySelector("#abClose").onclick = closeModal;
+  m.querySelector("#abTpl").onclick = () => { closeModal(); openTemplates(); };
 }
 
 function openAdd(){
@@ -589,16 +815,22 @@ function openAdd(){
 /* ============================================================
    COMPOSE + SEND QUEUE
    ============================================================ */
-function openCompose(list, i){
+function openCompose(list, i, forceVariant){
   const c = list[i];
   if (!c) { closeModal(); toastMsg("Queue finished"); return; }
   const followUp = isDue(c);
-  const m0 = composeFor(c, followUp);
+  const vs = templates().variants;
+  const m0 = composeFor(c, followUp, forceVariant);
 
   const m = modal(`
     ${list.length > 1 ? `<div class="qbar">Send queue — ${i+1} of ${list.length}</div>` : ""}
     <div class="qbrand">${esc(c.brand)}</div>
     <p class="hint">${esc(c.person || "Generic inbox")} · ${esc(c.email)}${followUp ? " · follow-up" : ""}</p>
+    ${(!followUp && vs.length > 1) ? `
+      <div class="field"><label>Template variant (A/B)</label>
+        <select id="cVar">${vs.map(v =>
+          `<option value="${esc(v.id)}" ${v.id === m0.variant ? "selected" : ""}>${esc(v.name)}</option>`
+        ).join("")}</select></div>` : ""}
     <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
     <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
     <div class="row">
@@ -623,12 +855,18 @@ function openCompose(list, i){
   sync();
   m.querySelector("#cSubj").addEventListener("input", sync);
   m.querySelector("#cBody").addEventListener("input", sync);
+  // Switching variant reloads the wording, so re-open rather than patch in place.
+  m.querySelector("#cVar")?.addEventListener("change", e => openCompose(list, i, e.target.value));
 
   const advance = () => openCompose(list, i + 1);
   const setStatus = s => {
     const r = edit(c.id);
     r.status = s;
     if (s === "Pitched" || s === "Followed Up") r.pitched = today();
+    // Stamp the variant on the first pitch only (Sent, Replied or Bounced all
+    // mean this wording went out). Follow-ups share one template, so counting
+    // them would test two things at once.
+    if (!followUp && m0.variant && !r.variant) r.variant = m0.variant;
     store.saveItem(c.id); store.flush();
   };
 
@@ -709,6 +947,7 @@ $("cats").addEventListener("click", e => {
 
 $("btnSettings").onclick  = openSettings;
 $("btnTemplates").onclick = openTemplates;
+$("btnAB").onclick        = openAB;
 $("btnAdd").onclick       = openAdd;
 $("btnQueue").onclick     = startQueue;
 
@@ -723,10 +962,11 @@ $("expBackup").onclick = () =>
 
 $("expCsv").onclick = () => {
   const qq = s => '"' + String(s ?? "").replace(/"/g, '""') + '"';
-  const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Notes"]]
+  const rows = [["Brand","Contact","Email","Website","Category","Contact type","Status","Date pitched","Variant","Notes"]]
     .concat(visible().map(c => {
       const r = rec(c.id);
-      return [c.brand, c.person, c.email, c.site, c.cat, c.kind, r.status, r.pitched, r.notes];
+      return [c.brand, c.person, c.email, c.site, c.cat, c.kind, r.status, r.pitched,
+              r.variant || "", r.notes];
     }));
   download("ugc-outreach-" + today() + ".csv", rows.map(r => r.map(qq).join(",")).join("\n"), "text/csv");
 };
