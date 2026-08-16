@@ -175,6 +175,12 @@
     <button class="chip" id="fNoIdeas">💡 Needs ideas</button>
   </div>
   <div class="row" id="cats"></div>
+  <div class="row" id="bulkBar">
+    <button class="btn" id="bsPickAll">Select all shown</button>
+    <button class="btn" id="bsPickNone">Clear</button>
+    <button class="btn primary" id="btnBulk">✉ Send selected (0)</button>
+    <span class="hint" id="bsCap" style="margin:0"></span>
+  </div>
   <div class="row">
     <button class="btn primary" id="btnQueue">▶ Start send queue</button>
     <span class="spacer"></span>
@@ -217,6 +223,12 @@ const WORKER_URL = "PASTE_WORKER_URL";
 const CAN_SUGGEST = () => CLOUD && !WORKER_URL.startsWith("PASTE_") && !!getIdToken;
 let getIdToken = null;   // set once she's signed in
 
+/* Google OAuth client for sending through her own Gmail. Left as-is, the
+   send-selected controls don't appear and everything else works. */
+const GOOGLE_CLIENT_ID = "PASTE_GOOGLE_CLIENT_ID";
+const CAN_SEND = () => !GOOGLE_CLIENT_ID.startsWith("PASTE_");
+const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
 /* Embedded in the local build; empty in the deployed build, where
    the list is loaded from the database behind the login instead. */
 let CONTACTS = [];
@@ -239,7 +251,11 @@ const daysSince = d => d ? Math.floor((new Date(today()) - new Date(d)) / 864000
    ============================================================ */
 const DEFAULT_ITEM = {status:"New", pitched:"", notes:""};
 
-const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:""};
+// dailyCap and sendGapSec exist to protect her Gmail account's standing, not
+// to protect the app — cold sending in fast bursts is what gets accounts
+// restricted. Deliberately low defaults; she can raise them knowingly.
+const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:"",
+                          dailyCap:15, sendGapSec:12};
 
 const DEFAULT_VARIANTS = [
   {
@@ -520,10 +536,14 @@ function merge(tpl, c, ideasText){
 // Balance variants *within a category*. Random assignment would let one variant
 // drift toward beauty brands and the other toward pet brands, and that confound
 // would corrupt the comparison faster than the sample size does.
-function pickVariant(c){
+// `pending` counts variants already assigned earlier in the same batch but not
+// yet sent. Without it a bulk run composes every email before any is recorded,
+// so every one sees a zero tally and picks the same variant.
+function pickVariant(c, pending){
   const vs = templates().variants;
   const counts = vs.map(v =>
-    allContacts().filter(x => x.cat === c.cat && rec(x.id).variant === v.id).length);
+    allContacts().filter(x => x.cat === c.cat && rec(x.id).variant === v.id).length
+    + (pending?.[c.cat]?.[v.id] || 0));
   return vs[counts.indexOf(Math.min(...counts))];
 }
 
@@ -550,6 +570,85 @@ const gmailLink = (c, m) => {
        + "&su=" + encodeURIComponent(m.subject)
        + "&body=" + encodeURIComponent(m.body);
 };
+
+/* ============================================================
+   GMAIL SENDING
+   ============================================================ */
+let gmailToken = null;      // access token, held in memory for this session only
+let gmailTokenClient = null;
+
+function loadGis(){
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.onload = ok;
+    s.onerror = () => fail(new Error("Couldn't load Google sign-in."));
+    document.head.appendChild(s);
+  });
+}
+
+// No refresh token is stored anywhere — she consents per session and the token
+// lives in memory. That's what keeps this out of Google's app-verification path.
+async function gmailAuthorize(force){
+  if (gmailToken && !force) return gmailToken;
+  await loadGis();
+  return new Promise((ok, fail) => {
+    gmailTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GMAIL_SCOPE,
+      callback: resp => {
+        if (resp.error) return fail(new Error("Gmail access was declined."));
+        gmailToken = resp.access_token;
+        ok(gmailToken);
+      },
+      error_callback: () => fail(new Error("Gmail sign-in was closed before finishing.")),
+    });
+    gmailTokenClient.requestAccessToken({prompt: gmailToken ? "" : "consent"});
+  });
+}
+
+const b64url = bytes => {
+  let bin = "";
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+// Non-ASCII in a header must be an RFC 2047 encoded-word or Gmail mangles it.
+const encHeader = s =>
+  /^[\x20-\x7E]*$/.test(s) ? s : "=?UTF-8?B?" + b64url(new TextEncoder().encode(s)).replace(/-/g,"+").replace(/_/g,"/") + "?=";
+
+function buildRaw(to, subject, body){
+  const mime =
+    `To: ${to}\r\n` +
+    `Subject: ${encHeader(subject)}\r\n` +
+    `MIME-Version: 1.0\r\n` +
+    `Content-Type: text/plain; charset="UTF-8"\r\n` +
+    `Content-Transfer-Encoding: 8bit\r\n\r\n` +
+    body.replace(/\r?\n/g, "\r\n");
+  return b64url(new TextEncoder().encode(mime));
+}
+
+async function gmailSend(to, subject, body){
+  const send = async token => fetch(
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    {method: "POST",
+     headers: {"authorization": "Bearer " + token, "content-type": "application/json"},
+     body: JSON.stringify({raw: buildRaw(to, subject, body)})});
+
+  let res = await send(await gmailAuthorize());
+  if (res.status === 401){                       // token aged out mid-run
+    res = await send(await gmailAuthorize(true));
+  }
+  if (!res.ok){
+    let detail = "";
+    try { detail = (await res.json()).error?.message || ""; } catch(e){}
+    const err = new Error(detail || ("Gmail returned " + res.status));
+    // 429/403 usually means a sending limit — stop the whole run, don't grind on.
+    err.fatal = res.status === 429 || res.status === 403;
+    throw err;
+  }
+  return true;
+}
 
 /* ============================================================
    AI SUGGESTIONS (via the Cloudflare Worker)
@@ -635,6 +734,8 @@ function renderList(){
     return `
     <div class="card ${due?"due":""} ${open.has(String(c.id))?"open":""}" data-id="${c.id}">
       <div class="head js-toggle">
+        ${CAN_SEND() ? `<input type="checkbox" class="js-pick" ${selected.has(String(c.id)) ? "checked" : ""}
+           title="Select for bulk send" style="width:17px;height:17px;flex:none">` : ""}
         <div class="who">
           <div class="brand">${esc(c.brand)}</div>
           <div class="sub">${esc(c.person || "—")} · ${esc(c.email)}</div>
@@ -676,7 +777,7 @@ function render(){
   // Don't yank the DOM out from under her while she's typing a note.
   if (document.activeElement && document.activeElement.closest?.(".card")) { renderPending = true; return; }
   renderPending = false;
-  renderStats(); renderList();
+  renderStats(); renderList(); paintBulkBar();
 }
 
 /* ============================================================
@@ -700,15 +801,28 @@ function openSettings(){
     <div class="field"><label>Portfolio link</label><input id="sPortfolio" value="${esc(s.portfolio)}" placeholder="https://…"></div>
     <div class="field"><label>Rate card link (optional)</label><input id="sRate" value="${esc(s.ratecard)}" placeholder="https://…"></div>
     <div class="field"><label>Signature</label><textarea id="sSig" placeholder="@yourhandle · yoursite.com">${esc(s.signature)}</textarea></div>
+    ${CAN_SEND() ? `
+    <div class="row">
+      <div class="field"><label>Max emails per day</label>
+        <input id="sCap" type="number" min="1" max="200" value="${s.dailyCap}"></div>
+      <div class="field"><label>Seconds between sends</label>
+        <input id="sGap" type="number" min="0" max="600" value="${s.sendGapSec}"></div>
+    </div>
+    <p class="hint">These protect your Gmail account, not the app. Cold email sent fast
+       and in volume is what gets accounts restricted — raise them slowly, and only once
+       replies show the list is landing.</p>` : ""}
     <p class="hint">Your email address here sets the signature and tells the Gmail button which account to open.
        The email itself still sends from whichever account your mail app is signed into.</p>
     <div class="row"><button class="btn primary" id="sSave">Save</button><button class="btn" id="sCancel">Cancel</button></div>`);
   m.querySelector("#sCancel").onclick = closeModal;
   m.querySelector("#sSave").onclick = () => {
     state.settings = {
+      ...settings(),
       name: $("sName").value.trim(), email: $("sEmail").value.trim(),
       portfolio: $("sPortfolio").value.trim(), ratecard: $("sRate").value.trim(),
-      signature: $("sSig").value.trim()
+      signature: $("sSig").value.trim(),
+      ...(CAN_SEND() ? {dailyCap: Math.max(1, +$("sCap").value || 15),
+                        sendGapSec: Math.max(0, +$("sGap").value || 0)} : {})
     };
     store.saveBranch("settings"); store.flush(); closeModal(); toastMsg("Saved");
   };
@@ -969,6 +1083,143 @@ function openAdd(){
 }
 
 /* ============================================================
+   BULK SEND
+   ============================================================ */
+const selected = new Set();   // session-only; never persisted
+const sentToday = () => allContacts().filter(c => rec(c.id).pitched === today()).length;
+
+// Every reason a brand must not be auto-sent. The stock-ideas rule is the
+// important one: at bulk speed she'd never notice 20 emails each claiming
+// "I had three ideas for you" while carrying identical template text.
+function blockReason(c, capLeft){
+  const r = rec(c.id);
+  if (r.status === "Bounced")                 return "address bounced before";
+  if (r.status !== "New")                     return "already " + r.status.toLowerCase();
+  if (isDue(c))                               return "needs a follow-up, not a first pitch";
+  if (ideasAreStock(c, r.ideas))              return "ideas are still the stock " + c.cat + " starters";
+  if (!(r.ideas || "").trim())                return "no ideas written";
+  if (capLeft <= 0)                           return "over today's cap";
+  return null;
+}
+
+function openBulkSend(){
+  const st = settings();
+  const picked = allContacts().filter(c => selected.has(String(c.id)));
+  if (!picked.length) return toastMsg("Nothing selected");
+
+  const missing = [];
+  if (!st.name)      missing.push("your name");
+  if (!st.portfolio) missing.push("your portfolio link");
+
+  let capLeft = Math.max(0, (st.dailyCap || 15) - sentToday());
+  const ready = [], blocked = [], pending = {};
+  for (const c of picked){
+    const why = blockReason(c, capLeft);
+    if (why) { blocked.push({c, why}); continue; }
+    capLeft--;
+    // Assign the variant against the batch-aware tally, then book it so the
+    // next brand in the same category sees it.
+    const v = pickVariant(c, pending);
+    (pending[c.cat] ||= {})[v.id] = (pending[c.cat]?.[v.id] || 0) + 1;
+    ready.push({c, ...composeFor(c, false, v.id)});
+  }
+
+  const row = (name, right) =>
+    `<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13.5px">
+       <span style="flex:1;min-width:0">${esc(name)}</span>
+       <span style="color:var(--muted);white-space:nowrap">${right}</span></div>`;
+
+  const m = modal(`
+    <h2>Send ${ready.length} email${ready.length === 1 ? "" : "s"}</h2>
+    <p class="hint">Sent from your Gmail, one at a time with a pause between each.
+       ${sentToday()} already sent today · cap ${st.dailyCap || 15}.</p>
+    ${missing.length ? `<p class="hint" style="color:var(--warn)">
+       <b>Set ${esc(missing.join(" and "))} in Settings first</b> — every email would go out with a placeholder.</p>` : ""}
+    ${ready.length ? `<div class="field"><label>Will send</label>
+      <div style="max-height:190px;overflow:auto">${
+        ready.map(r => row(r.c.brand, esc(r.c.email))).join("")}</div></div>` : ""}
+    ${blocked.length ? `<div class="field"><label>Skipped (${blocked.length})</label>
+      <div style="max-height:150px;overflow:auto">${
+        blocked.map(b => row(b.c.brand, `<span style="color:var(--warn)">${esc(b.why)}</span>`)).join("")}</div></div>` : ""}
+    <div id="bsProgress"></div>
+    <div class="row">
+      <button class="btn primary" id="bsGo" ${(!ready.length || missing.length) ? "disabled" : ""}>
+        Send ${ready.length}</button>
+      <button class="btn" id="bsStop" style="display:none">Stop</button>
+      <span class="spacer"></span>
+      <button class="btn" id="bsClose">Close</button>
+    </div>`);
+
+  m.querySelector("#bsClose").onclick = closeModal;
+  m.querySelector("#bsGo").onclick = () => runBulkSend(m, ready);
+}
+
+async function runBulkSend(m, ready){
+  const go = m.querySelector("#bsGo"), stopBtn = m.querySelector("#bsStop");
+  const prog = m.querySelector("#bsProgress");
+  let stopped = false;
+  stopBtn.onclick = () => { stopped = true; stopBtn.textContent = "Stopping…"; };
+
+  go.disabled = true; go.textContent = "Sending…"; stopBtn.style.display = "";
+  prog.innerHTML = `<div class="field"><label>Progress</label><div id="bsRows"></div></div>`;
+  const rows = m.querySelector("#bsRows");
+  const line = (name, state, cls) =>
+    `<div style="display:flex;gap:10px;padding:4px 0;font-size:13.5px">
+       <span style="flex:1">${esc(name)}</span>
+       <span style="color:var(--${cls})">${esc(state)}</span></div>`;
+
+  try {
+    await gmailAuthorize();          // one consent for the whole run
+  } catch (err) {
+    prog.innerHTML = `<p class="hint" style="color:var(--warn)">${esc(err.message)}</p>`;
+    go.disabled = false; go.textContent = "Try again"; stopBtn.style.display = "none";
+    return;
+  }
+
+  const gap = Math.max(0, (settings().sendGapSec ?? 12)) * 1000;
+  let ok = 0, failed = 0;
+
+  for (let i = 0; i < ready.length; i++){
+    if (stopped){ rows.insertAdjacentHTML("beforeend", line("— stopped —", "", "muted")); break; }
+    const {c, subject, body, variant} = ready[i];
+    rows.insertAdjacentHTML("beforeend", line(c.brand, "sending…", "muted"));
+    const el = rows.lastElementChild;
+
+    try {
+      await gmailSend(c.email, subject, body);
+      const r = edit(c.id);
+      r.status = "Pitched";
+      r.pitched = today();
+      if (variant && !r.variant) r.variant = variant;
+      // Keep what actually went out, so the follow-up can refer back to it.
+      r.notes = (r.notes ? r.notes + "\n\n" : "") + `[sent ${today()}] ${subject}\n${body}`;
+      store.saveItem(c.id); store.flush();
+      el.outerHTML = line(c.brand, "sent ✓", "ok");
+      ok++;
+      selected.delete(String(c.id));
+    } catch (err) {
+      el.outerHTML = line(c.brand, err.message.slice(0, 60), "warn");
+      failed++;
+      if (err.fatal){
+        rows.insertAdjacentHTML("beforeend",
+          line("— stopped: Gmail is refusing further sends —", "", "warn"));
+        break;
+      }
+    }
+
+    if (i < ready.length - 1 && !stopped){
+      // Jittered so the pattern doesn't look mechanical.
+      await new Promise(r => setTimeout(r, gap + Math.random() * gap * 0.5));
+    }
+  }
+
+  stopBtn.style.display = "none";
+  go.textContent = `Done — ${ok} sent${failed ? `, ${failed} failed` : ""}`;
+  toastMsg(`${ok} sent${failed ? `, ${failed} failed` : ""}`);
+  render();
+}
+
+/* ============================================================
    COMPOSE + SEND QUEUE
    ============================================================ */
 function openCompose(list, i, forceVariant, ideasSoFar){
@@ -1140,6 +1391,11 @@ $("list").addEventListener("click", e => {
   const card = e.target.closest(".card"); if (!card) return;
   const c = allContacts().find(x => String(x.id) === card.dataset.id); if (!c) return;
 
+  if (e.target.classList.contains("js-pick")){
+    e.target.checked ? selected.add(card.dataset.id) : selected.delete(card.dataset.id);
+    paintBulkBar();
+    return;                                  // don't also toggle the card open
+  }
   if (e.target.classList.contains("js-compose")) return openCompose([c], 0);
   if (e.target.classList.contains("js-del")){
     if (!confirm("Delete " + c.brand + "?")) return;
@@ -1193,6 +1449,18 @@ $("cats").addEventListener("click", e => {
   $("cats").querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b));
   render();
 });
+
+function paintBulkBar(){
+  if (!CAN_SEND()){ $("bulkBar").classList.add("hide"); return; }
+  const cap = settings().dailyCap || 15, used = sentToday();
+  $("btnBulk").textContent = `✉ Send selected (${selected.size})`;
+  $("btnBulk").disabled = selected.size === 0;
+  $("bsCap").textContent = `${used} sent today · cap ${cap}`;
+  $("bsCap").style.color = used >= cap ? "var(--warn)" : "var(--muted)";
+}
+$("bsPickAll").onclick  = () => { visible().forEach(c => selected.add(String(c.id))); render(); };
+$("bsPickNone").onclick = () => { selected.clear(); render(); };
+$("btnBulk").onclick    = openBulkSend;
 
 $("btnSettings").onclick  = openSettings;
 $("btnTemplates").onclick = openTemplates;
