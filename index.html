@@ -246,7 +246,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.9.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -575,6 +575,18 @@ function composeFor(c, followUp, variantId, ideasText){
           subject: merge(v.subjectPitch, c, ideasText),
           body: merge(bodyTpl, c, ideasText).replace(/\n{3,}/g, "\n\n")};
 }
+// Catches template placeholders that never got filled in — either square-bracket
+// ones from a template written elsewhere ([Brand], [your portfolio link]), or a
+// leftover {curly} field the merge didn't recognise, or our own
+// "[set this in Settings]" fallbacks. An email that goes out with these in it is
+// the clearest possible signal to a spam filter that it's an unfinished blast.
+const UNFILLED = /\[[^\]\n]{2,60}\]|\{[A-Za-z_][A-Za-z_ ]{1,28}\}/g;
+const unfilledIn = (...parts) => {
+  const found = new Set();
+  parts.filter(Boolean).forEach(p => (String(p).match(UNFILLED) || []).forEach(x => found.add(x)));
+  return [...found].slice(0, 6);
+};
+
 const mailtoLink = (c, m) =>
   `mailto:${c.email}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
 const gmailLink = (c, m) => {
@@ -1199,8 +1211,16 @@ function openBulkSend(){
     // Assign the variant against the batch-aware tally, then book it so the
     // next brand in the same category sees it.
     const v = pickVariant(c, pending);
+    const built = composeFor(c, false, v.id);
+    // Last gate: never send an email that still has [Brand] or {field} in it.
+    const bad = unfilledIn(built.subject, built.body);
+    if (bad.length){
+      blocked.push({c, why: "unfilled placeholder " + bad[0]});
+      capLeft++;                       // didn't actually use a slot
+      continue;
+    }
     (pending[c.cat] ||= {})[v.id] = (pending[c.cat]?.[v.id] || 0) + 1;
-    ready.push({c, ...composeFor(c, false, v.id)});
+    ready.push({c, ...built});
   }
 
   const row = (name, right) =>
@@ -1396,6 +1416,7 @@ function openCompose(list, i, forceVariant, ideasSoFar){
       </div>`}
     <div class="field"><label>Subject</label><input id="cSubj" value="${esc(m0.subject)}"></div>
     <div class="field"><label>Body</label><textarea id="cBody" style="min-height:230px">${esc(m0.body)}</textarea></div>
+    <p class="hint" id="cFillWarn" style="margin:-6px 0 10px"></p>
     <div class="row">
       <a class="btn primary" id="cGmail" target="_blank" rel="noopener">Open in Gmail</a>
       <a class="btn" id="cMail">Open in mail app</a>
@@ -1411,9 +1432,20 @@ function openCompose(list, i, forceVariant, ideasSoFar){
     </div>`);
 
   const live = () => ({subject: $("cSubj").value, body: $("cBody").value});
+  const fillWarn = m.querySelector("#cFillWarn");
+  const paintFill = () => {
+    const bad = unfilledIn($("cSubj").value, $("cBody").value);
+    fillWarn.innerHTML = bad.length
+      ? `<b style="color:var(--warn)">Don't send this yet — ${esc(bad.join(", "))}
+         ${bad.length === 1 ? "is a placeholder that" : "are placeholders that"} never got filled in.</b>
+         Replace them with real words, or use the app's own fields
+         (<code>{brand} {name} {me} {portfolio} {ideas}</code>) so they fill automatically.`
+      : "";
+  };
   const sync = () => {
     m.querySelector("#cGmail").href = gmailLink(c, live());
     m.querySelector("#cMail").href  = mailtoLink(c, live());
+    paintFill();
   };
   sync();
   m.querySelector("#cSubj").addEventListener("input", sync);
