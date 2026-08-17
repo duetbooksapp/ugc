@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -271,7 +271,12 @@ const DEFAULT_ITEM = {status:"New", pitched:"", notes:""};
 // to protect the app — cold sending in fast bursts is what gets accounts
 // restricted. Deliberately low defaults; she can raise them knowingly.
 const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecard:"",
-                          dailyCap:15, sendGapSec:12, googleClientId:""};
+                          dailyCap:15, sendGapSec:12, googleClientId:"",
+                          // Creator profile — feeds the ✨ idea generator and the
+                          // template drafter so both sound like her, not like AI.
+                          about:"", favorites:"", audience:"",
+                          voiceSample:"", styleNotes:"",
+                          video1:"", video1Desc:"", video2:"", video2Desc:""};
 
 const DEFAULT_VARIANTS = [
   {
@@ -552,9 +557,11 @@ function merge(tpl, c, ideasText){
     "{signature}": st.signature || "",
     "{hook}": (s.hooks[c.cat] || "").replace(/\{brand\}/g, c.brand),
     // Lead-in travels with the ideas so an empty box leaves no orphan line.
-    "{ideas}": ideas ? ((s.ideasLead || "").trim() + "\n" + ideas) : ""
+    "{ideas}": ideas ? ((s.ideasLead || "").trim() + "\n" + ideas) : "",
+    // Portfolio video links from the creator profile, one per line.
+    "{videos}": [st.video1, st.video2].map(v => (v || "").trim()).filter(Boolean).join("\n")
   };
-  return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}|\{ideas\}/g,
+  return String(tpl).replace(/\{brand\}|\{name\}|\{category\}|\{site\}|\{me\}|\{portfolio\}|\{ratecard\}|\{signature\}|\{hook\}|\{ideas\}|\{videos\}/g,
                              m => map[m] ?? m);
 }
 // Balance variants *within a category*. Random assignment would let one variant
@@ -778,12 +785,30 @@ const SUGGEST_ERRORS = {
   unauthenticated: "Your login expired. Refresh the page and sign in again.",
 };
 
+// The creator profile from Settings, as the payload the Worker's prompts use.
+// Returns null when every field is blank so prompts stay unchanged until
+// Amanda fills it in.
+function creatorProfile(){
+  const s = settings(), t = x => (x || "").trim();
+  const p = {};
+  if (t(s.about))       p.about = t(s.about);
+  if (t(s.favorites))   p.favorites = t(s.favorites);
+  if (t(s.audience))    p.audience = t(s.audience);
+  if (t(s.voiceSample)) p.voice_sample = t(s.voiceSample);
+  if (t(s.styleNotes))  p.style_notes = t(s.styleNotes);
+  const videos = [[s.video1, s.video1Desc], [s.video2, s.video2Desc]]
+    .filter(([u]) => t(u)).map(([u, d]) => ({url: t(u), what: t(d)}));
+  if (videos.length) p.videos = videos;
+  return Object.keys(p).length ? p : null;
+}
+
 async function suggestFromSite(c){
   const token = await getIdToken();
   const res = await fetch(WORKER_URL, {
     method: "POST",
     headers: {"content-type": "application/json", "authorization": "Bearer " + token},
-    body: JSON.stringify({brand: c.brand, category: c.cat, url: c.site}),
+    body: JSON.stringify({brand: c.brand, category: c.cat, url: c.site,
+                          creator: creatorProfile() || undefined}),
   });
   let data = {};
   try { data = await res.json(); } catch(e){}
@@ -791,6 +816,33 @@ async function suggestFromSite(c){
   if (!res.ok)    throw new Error("Couldn't reach the idea service (" + res.status + ").");
   if (!Array.isArray(data.ideas) || !data.ideas.length) throw new Error("No ideas came back.");
   return data.ideas.map((s, i) => `${i + 1}. ${String(s).replace(/^\d+[.)]\s*/, "").trim()}`);
+}
+
+// Phase 2: ask the Worker to write template wording in her voice. Returns
+// {subjectPitch, bodyNamed, bodyGeneric, subjectFollow, bodyFollow} with
+// {curly} merge fields intact — validated on both ends before it's usable.
+async function draftTemplatesFromProfile(){
+  const token = await getIdToken();
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: {"content-type": "application/json", "authorization": "Bearer " + token},
+    body: JSON.stringify({kind: "templates", creator: creatorProfile()}),
+  });
+  let data = {};
+  try { data = await res.json(); } catch(e){}
+  if (data.error === "no_profile")
+    throw new Error("Fill in the About-the-creator section in Settings first — the drafts are built from it.");
+  if (data.error) throw new Error(SUGGEST_ERRORS[data.error] || ("Couldn't draft templates: " + data.error));
+  if (!res.ok)    throw new Error("Couldn't reach the drafting service (" + res.status + ").");
+  // Belt and braces on top of the Worker's own checks: pitch bodies must carry
+  // {ideas}, and nothing may contain [square] placeholders the merge ignores.
+  for (const k of ["subjectPitch", "bodyNamed", "bodyGeneric", "subjectFollow", "bodyFollow"])
+    if (typeof data[k] !== "string" || !data[k].trim()) throw new Error("The draft came back incomplete — try again.");
+  if (!data.bodyNamed.includes("{ideas}") || !data.bodyGeneric.includes("{ideas}"))
+    throw new Error("The draft was missing the {ideas} field — try again.");
+  if (/\[[^\]\n]{2,}\]/.test(data.bodyNamed + data.bodyGeneric + data.bodyFollow))
+    throw new Error("The draft contained [bracket] placeholders — try again.");
+  return data;
 }
 
 /* ============================================================
@@ -893,6 +945,41 @@ function openSettings(){
     <div class="field"><label>Portfolio link</label><input id="sPortfolio" value="${esc(s.portfolio)}" placeholder="https://…"></div>
     <div class="field"><label>Rate card link (optional)</label><input id="sRate" value="${esc(s.ratecard)}" placeholder="https://…"></div>
     <div class="field"><label>Signature</label><textarea id="sSig" placeholder="@yourhandle · yoursite.com">${esc(s.signature)}</textarea></div>
+
+    <p class="hint" style="margin-top:16px"><b>About the creator</b> — the ✨ idea generator and
+       the template drafter use this to make everything sound like you and connect brands to
+       your real life. Every field is optional; fill in what you can.</p>
+    <div class="field"><label>Who I am</label>
+      <textarea id="sAbout" style="min-height:70px"
+        placeholder="Full-time UGC creator. I play pickleball 4x a week, travel monthly, thrift most weekends…">${esc(s.about || "")}</textarea></div>
+    <div class="field"><label>My favorites — things I love and know deeply</label>
+      <textarea id="sFavorites" style="min-height:60px"
+        placeholder="Pickleball, budget travel, thrifted fashion, meal prep…">${esc(s.favorites || "")}</textarea></div>
+    <div class="field"><label>My audience — who watches and relates</label>
+      <textarea id="sAudience" style="min-height:60px"
+        placeholder="Mostly women 25–40 getting into racquet sports and healthy routines…">${esc(s.audience || "")}</textarea></div>
+    <div class="field"><label>How I sound — paste something you actually wrote and like</label>
+      <textarea id="sVoice" style="min-height:90px"
+        placeholder="A caption, DM, or pitch in your own words — the drafter imitates this.">${esc(s.voiceSample || "")}</textarea></div>
+    <div class="field"><label>Style notes</label>
+      <input id="sStyle" value="${esc(s.styleNotes || "")}"
+        placeholder="casual, funny, no corporate speak, short sentences"></div>
+    <div class="row">
+      <div class="field"><label>Video link 1</label>
+        <input id="sVideo1" value="${esc(s.video1 || "")}" placeholder="https://…"></div>
+      <div class="field"><label>What happens in it</label>
+        <input id="sVideo1Desc" value="${esc(s.video1Desc || "")}" placeholder="Court-side gear try-on that hit 200k views"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Video link 2</label>
+        <input id="sVideo2" value="${esc(s.video2 || "")}" placeholder="https://…"></div>
+      <div class="field"><label>What happens in it</label>
+        <input id="sVideo2Desc" value="${esc(s.video2Desc || "")}" placeholder="Thrift-flip styling video"></div>
+    </div>
+    <p class="hint">The links can be dropped into emails with the <code>{videos}</code> template
+       field. The AI can't watch the videos — it reads your descriptions of them, so say what
+       makes each one work.</p>
+
     <p class="hint" style="margin-top:16px"><b>Sending your own email</b></p>
     <div class="field"><label>Your Google OAuth client ID</label>
       <input id="sClient" value="${esc(s.googleClientId)}"
@@ -920,6 +1007,11 @@ function openSettings(){
       name: $("sName").value.trim(), email: $("sEmail").value.trim(),
       portfolio: $("sPortfolio").value.trim(), ratecard: $("sRate").value.trim(),
       signature: $("sSig").value.trim(),
+      about: $("sAbout").value.trim(), favorites: $("sFavorites").value.trim(),
+      audience: $("sAudience").value.trim(), voiceSample: $("sVoice").value.trim(),
+      styleNotes: $("sStyle").value.trim(),
+      video1: $("sVideo1").value.trim(), video1Desc: $("sVideo1Desc").value.trim(),
+      video2: $("sVideo2").value.trim(), video2Desc: $("sVideo2Desc").value.trim(),
       googleClientId: $("sClient").value.trim(),
       ...(CAN_SEND() ? {dailyCap: Math.max(1, +$("sCap").value || 15),
                         sendGapSec: Math.max(0, +$("sGap").value || 0)} : {})
@@ -938,7 +1030,15 @@ function openTemplates(){
   const m = modal(`
     <h2>Email templates</h2>
     <p class="hint">Edit freely — your own wording will beat mine. Fields you can use:
-       <code>{brand} {name} {me} {portfolio} {ratecard} {signature} {hook}</code></p>
+       <code>{brand} {name} {me} {portfolio} {ratecard} {signature} {hook} {ideas} {videos}</code></p>
+    ${CAN_SUGGEST() ? `
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn" id="tDraft">✨ Draft templates in my voice</button>
+      <span class="hint" id="tDraftMsg" style="margin:0"></span>
+    </div>
+    <p class="hint" style="margin-top:-6px">Writes the pitch and follow-up below from the
+       About-the-creator section in Settings — it only fills this editor, so review the
+       wording and hit Save to keep it (or Cancel to throw it away).</p>` : ""}
 
     <div class="field"><label>Variant being edited (A/B)</label>
       <select id="tVar"></select></div>
@@ -1018,6 +1118,25 @@ function openTemplates(){
     $("tHook").value = hooks[curCat] || "";
     $("tScaffold").value = scaffolds[curCat] || "";
   };
+
+  // Phase 2: AI-drafted wording lands in the editor fields only — the existing
+  // Save/Cancel pair is the review step, nothing is stored until Save.
+  m.querySelector("#tDraft")?.addEventListener("click", async e => {
+    const btn = e.target, msg = $("tDraftMsg");
+    btn.disabled = true; msg.textContent = "Writing in your voice…";
+    try {
+      const d = await draftTemplatesFromProfile();
+      $("tSubj").value = d.subjectPitch;
+      $("tNamed").value = d.bodyNamed;
+      $("tGen").value = d.bodyGeneric;
+      $("tFSubj").value = d.subjectFollow;
+      $("tFBody").value = d.bodyFollow;
+      msg.textContent = "Draft is in the editor — read it, tweak it, then Save.";
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+    btn.disabled = false;
+  });
 
   m.querySelector("#tCancel").onclick = closeModal;
   m.querySelector("#tReset").onclick = () => {
