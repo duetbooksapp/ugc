@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.13.0";
+const APP_VERSION = "1.14.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -785,6 +785,19 @@ const SUGGEST_ERRORS = {
   unauthenticated: "Your login expired. Refresh the page and sign in again.",
 };
 
+// The prompt she pastes into HER Claude (claude.ai) — it knows her from her
+// own conversations; its answer comes back here and is parsed into the fields.
+const PROFILE_PROMPT =
+`Write out my creator profile for a brand-outreach tool, using what you know about me:
+
+1. Who I am — 2 or 3 sentences.
+2. Things I love and know deeply (sports, hobbies, niches).
+3. My audience — who follows me and relates to my content.
+4. How my writing sounds — and quote 2 or 3 real captions or messages I've actually written, word for word.
+5. My best 1 or 2 videos — the link, plus one sentence on what happens in each and why it worked.
+
+Plain text, clearly numbered, no tables.`;
+
 // The creator profile from Settings, as the payload the Worker's prompts use.
 // Returns null when every field is blank so prompts stay unchanged until
 // Amanda fills it in.
@@ -816,6 +829,22 @@ async function suggestFromSite(c){
   if (!res.ok)    throw new Error("Couldn't reach the idea service (" + res.status + ").");
   if (!Array.isArray(data.ideas) || !data.ideas.length) throw new Error("No ideas came back.");
   return data.ideas.map((s, i) => `${i + 1}. ${String(s).replace(/^\d+[.)]\s*/, "").trim()}`);
+}
+
+// Parse the answer her Claude gave into profile fields. Returns any subset of
+// {about, favorites, audience, style_notes, voice_sample, videos:[{url,what}]}.
+async function parseProfileText(text){
+  const token = await getIdToken();
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: {"content-type": "application/json", "authorization": "Bearer " + token},
+    body: JSON.stringify({kind: "profile_parse", text}),
+  });
+  let data = {};
+  try { data = await res.json(); } catch(e){}
+  if (data.error) throw new Error(SUGGEST_ERRORS[data.error] || ("Couldn't read that: " + data.error));
+  if (!res.ok) throw new Error("Couldn't reach the service (" + res.status + ").");
+  return data;
 }
 
 // Phase 2: ask the Worker to write template wording in her voice. Returns
@@ -979,6 +1008,24 @@ function openSettings(){
     <p class="hint">The links can be dropped into emails with the <code>{videos}</code> template
        field. The AI can't watch the videos — it reads your descriptions of them, so say what
        makes each one work.</p>
+    ${CAN_SUGGEST() ? `
+    <div class="row" style="margin-top:4px">
+      <button class="btn" id="sPullClaude">✨ Fill from my Claude</button>
+      <span class="hint" id="sPullMsg" style="margin:0"></span>
+    </div>
+    <div id="sPullBox" class="hide" style="border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:8px">
+      <p class="hint" style="margin-top:0"><b>1</b> — Copy this prompt and paste it into
+         <b>your own</b> Claude (claude.ai) — it knows you from your conversations:</p>
+      <div class="suggestbox" style="min-height:0;white-space:pre-wrap">${esc(PROFILE_PROMPT)}</div>
+      <div class="row" style="margin-top:6px"><button class="btn" id="sCopyPrompt">Copy prompt</button></div>
+      <p class="hint"><b>2</b> — Paste Claude's whole answer here:</p>
+      <div class="field"><textarea id="sPullText" style="min-height:120px"
+        placeholder="Paste the answer from your Claude…"></textarea></div>
+      <div class="row"><button class="btn primary" id="sPullGo">Fill in my profile</button></div>
+      <p class="hint">This only fills the fields above — read them over, then Save. "How I sound"
+         is filled only from captions you actually wrote (quoted word-for-word in the answer),
+         never from Claude's description of you — so the templates imitate you, not Claude.</p>
+    </div>` : ""}
 
     <p class="hint" style="margin-top:16px"><b>Sending your own email</b></p>
     <div class="field"><label>Your Google OAuth client ID</label>
@@ -1000,6 +1047,36 @@ function openSettings(){
     <p class="hint">Your email address here sets the signature and tells the Gmail button which account to open.
        The email itself still sends from whichever account your mail app is signed into.</p>
     <div class="row"><button class="btn primary" id="sSave">Save</button><button class="btn" id="sCancel">Cancel</button></div>`);
+  // "Fill from my Claude": copy prompt → her Claude answers → paste → parse
+  // into the fields above. Save stays the approval step.
+  m.querySelector("#sPullClaude")?.addEventListener("click", () =>
+    m.querySelector("#sPullBox").classList.toggle("hide"));
+  m.querySelector("#sCopyPrompt")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(PROFILE_PROMPT);
+          $("sPullMsg").textContent = "Prompt copied — paste it into your Claude."; }
+    catch(e){ $("sPullMsg").textContent = "Couldn't copy — select the prompt text and copy it manually."; }
+  });
+  m.querySelector("#sPullGo")?.addEventListener("click", async e => {
+    const btn = e.target, text = $("sPullText").value.trim();
+    if (!text) { $("sPullMsg").textContent = "Paste Claude's answer in first."; return; }
+    btn.disabled = true; $("sPullMsg").textContent = "Reading it…";
+    try {
+      const p = await parseProfileText(text);
+      const setIf = (id, v) => { if (v) $(id).value = v; };
+      setIf("sAbout", p.about); setIf("sFavorites", p.favorites);
+      setIf("sAudience", p.audience); setIf("sStyle", p.style_notes);
+      setIf("sVoice", p.voice_sample);
+      const v = p.videos || [];
+      if (v[0]) { setIf("sVideo1", v[0].url); setIf("sVideo1Desc", v[0].what); }
+      if (v[1]) { setIf("sVideo2", v[1].url); setIf("sVideo2Desc", v[1].what); }
+      $("sPullMsg").textContent = p.voice_sample
+        ? "Filled in — review the fields, then Save."
+        : "Filled in — no quoted captions were in the answer, so paste one of your own into “How I sound”. Then Save.";
+      m.querySelector("#sPullBox").classList.add("hide");
+    } catch (err) { $("sPullMsg").textContent = err.message; }
+    btn.disabled = false;
+  });
+
   m.querySelector("#sCancel").onclick = closeModal;
   m.querySelector("#sSave").onclick = () => {
     state.settings = {
