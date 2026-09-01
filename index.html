@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.15.1";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -448,6 +448,11 @@ let store = null;   // set once we know local vs cloud
 
 // Reading must never create a record — otherwise a single render
 // would write all 294 rows to the database.
+// Guards Settings/Templates against a save fired before the account's first
+// Firebase snapshot arrives — such a save would overwrite the account with
+// blanks. Local builds have their data synchronously, so they start true.
+let firstSyncDone = !CLOUD;
+
 const rec  = id => state.items[id] || DEFAULT_ITEM;
 const edit = id => (state.items[id] ||= {...DEFAULT_ITEM});
 // Checks EVERY field a record can carry. Missing one is destructive: CloudStore
@@ -970,6 +975,7 @@ function modal(html){
 const closeModal = () => { $("modalHost").innerHTML = ""; render(); };
 
 function openSettings(){
+  if (!firstSyncDone) return toastMsg("Still loading your account — give it a second, then try again.");
   const s = settings();
   const m = modal(`
     <h2>Your details</h2>
@@ -1126,6 +1132,7 @@ function openSettings(){
 }
 
 function openTemplates(){
+  if (!firstSyncDone) return toastMsg("Still loading your account — give it a second, then try again.");
   const t = templates();
   const vars  = structuredClone(t.variants);   // working copy until Save
   const hooks = {...t.hooks};
@@ -2050,7 +2057,7 @@ async function bootCloud(){
       CONTACTS = Object.values(snap.val() || {}).filter(c => c && c.id && c.email);
     } catch(err){ toastMsg("Couldn't load the brand list: " + err.message); }
     store = await CloudStore(fb, user.uid);
-    await store.start(() => { showApp(); render(); });
+    await store.start(() => { firstSyncDone = true; showApp(); render(); });
   });
 }
 
