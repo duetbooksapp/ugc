@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.14.1";
+const APP_VERSION = "1.15.0";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -276,7 +276,11 @@ const DEFAULT_SETTINGS = {name:"", email:"", signature:"", portfolio:"", ratecar
                           // template drafter so both sound like her, not like AI.
                           about:"", favorites:"", audience:"",
                           voiceSample:"", styleNotes:"",
-                          video1:"", video1Desc:"", video2:"", video2Desc:""};
+                          video1:"", video1Desc:"", video2:"", video2Desc:"",
+                          // Socials + logistics — what creator-platform application
+                          // forms ask for; not sent to the AI prompts.
+                          igHandle:"", igFollowers:"", tiktokHandle:"", tiktokFollowers:"",
+                          rateRange:"", location:""};
 
 const DEFAULT_VARIANTS = [
   {
@@ -995,6 +999,26 @@ function openSettings(){
       <input id="sStyle" value="${esc(s.styleNotes || "")}"
         placeholder="casual, funny, no corporate speak, short sentences"></div>
     <div class="row">
+      <div class="field"><label>Instagram handle</label>
+        <input id="sIG" value="${esc(s.igHandle || "")}" placeholder="@itsamandamaxim"></div>
+      <div class="field"><label>IG followers (approx.)</label>
+        <input id="sIGF" value="${esc(s.igFollowers || "")}" placeholder="1,200"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>TikTok handle</label>
+        <input id="sTT" value="${esc(s.tiktokHandle || "")}" placeholder="@itsamandamaxim"></div>
+      <div class="field"><label>TikTok followers (approx.)</label>
+        <input id="sTTF" value="${esc(s.tiktokFollowers || "")}" placeholder="3,500"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Rate range</label>
+        <input id="sRateRange" value="${esc(s.rateRange || "")}" placeholder="$150–250 per video"></div>
+      <div class="field"><label>Location</label>
+        <input id="sLocation" value="${esc(s.location || "")}" placeholder="Sarasota, FL"></div>
+    </div>
+    <p class="hint">Handles, follower counts, rates, and location are for creator-platform
+       applications — they aren't sent to the AI and don't appear in pitch emails.</p>
+    <div class="row">
       <div class="field"><label>Video link 1</label>
         <input id="sVideo1" value="${esc(s.video1 || "")}" placeholder="https://…"></div>
       <div class="field"><label>What happens in it</label>
@@ -1090,6 +1114,9 @@ function openSettings(){
       styleNotes: $("sStyle").value.trim(),
       video1: $("sVideo1").value.trim(), video1Desc: $("sVideo1Desc").value.trim(),
       video2: $("sVideo2").value.trim(), video2Desc: $("sVideo2Desc").value.trim(),
+      igHandle: $("sIG").value.trim(), igFollowers: $("sIGF").value.trim(),
+      tiktokHandle: $("sTT").value.trim(), tiktokFollowers: $("sTTF").value.trim(),
+      rateRange: $("sRateRange").value.trim(), location: $("sLocation").value.trim(),
       googleClientId: $("sClient").value.trim(),
       ...(CAN_SEND() ? {dailyCap: Math.max(1, +$("sCap").value || 15),
                         sendGapSec: Math.max(0, +$("sGap").value || 0)} : {})
