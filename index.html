@@ -247,7 +247,7 @@ let CONTACTS = [];
 
 // Bump on every deploy. Shown under the title so you can tell at a glance which
 // build is actually running — browsers cache this page aggressively.
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.14.1";
 
 const CATEGORIES = ["Fashion & Apparel","Supplements & Wellness","Food & Beverage","Beauty & Skincare",
   "Home & Kitchen","Outdoor & Gear","Pickleball","Travel","Pet","DTC & Lifestyle","UK & Europe","Apps & Tech"];
@@ -929,6 +929,7 @@ function renderList(){
     if (c.dupBrand)            tags.push('<span class="tag dup">2 contacts here</span>');
     if (c.mine)                tags.push('<span class="tag mine">added by you</span>');
     if (c.suggested)           tags.push('<span class="tag mine">researched ideas</span>');
+    if (c.deal)                tags.push(`<span class="tag">${esc(c.deal)}</span>`);
     if (due)                   tags.push(`<span class="tag duealert">follow up · ${n}d</span>`);
 
     return `
